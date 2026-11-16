@@ -31,6 +31,57 @@ export const TITLE_PREFIX = "Text";
 /** Longest title that is kept in the data (display is truncated further). */
 export const MAX_TITLE_LENGTH = 120;
 
+/**
+ * Name of the non enumerable marker that identifies one state instance.
+ *
+ * Why this exists: the ComfyUI frontend keeps node.properties inside a Vue
+ * reactive object. Reading a property back therefore returns a reactive
+ * *proxy* of the object that was written - never the same object. Comparing
+ * two states with "===" therefore never matches, every read looks like a
+ * brand new state and any change made to a state that was fetched earlier is
+ * written into an object that is no longer referenced by the node.
+ *
+ * The marker survives the proxy, so it gives us a stable identity. It is not
+ * enumerable, so it never appears in the workflow file.
+ */
+export const STATE_MARKER = "__mtt_state_marker";
+
+let markerCounter = 0;
+
+/** A fresh marker value. */
+export function createStateMarker() {
+    markerCounter += 1;
+    return "mtt-" + Date.now().toString(36) + "-" + markerCounter;
+}
+
+/**
+ * Attach a marker to a state object.
+ *
+ * @param {object} state        the state to mark
+ * @param {string} [marker]     marker to reuse, a new one is minted otherwise
+ */
+export function attachStateMarker(state, marker) {
+    if (!state || typeof state !== "object") {
+        return state;
+    }
+    Object.defineProperty(state, STATE_MARKER, {
+        value: typeof marker === "string" && marker ? marker : createStateMarker(),
+        enumerable: false,
+        writable: true,
+        configurable: true,
+    });
+    return state;
+}
+
+/** The marker of a state object, or null when it has none. */
+export function readStateMarker(state) {
+    if (!state || typeof state !== "object") {
+        return null;
+    }
+    const marker = state[STATE_MARKER];
+    return typeof marker === "string" ? marker : null;
+}
+
 let idCounter = 0;
 
 /**
@@ -94,11 +145,11 @@ export function uniqueTitle(base, titles) {
 /** A pristine state holding a single empty tab. */
 export function defaultState(fallbackContent) {
     const content = typeof fallbackContent === "string" ? fallbackContent : "";
-    return {
+    return attachStateMarker({
         version: SCHEMA_VERSION,
         active_id: "tab_001",
         tabs: [{ id: "tab_001", title: TITLE_PREFIX + " 1", content }],
-    };
+    });
 }
 
 /**
@@ -173,12 +224,14 @@ export function normalizeState(raw, fallbackContent) {
             issues.push("active_id " + wanted + " does not exist, fell back to " + state.active_id);
         }
     }
-    return { state: state, issues: issues };
+    // A repaired state is still the same state, so it keeps its marker.
+    return { state: attachStateMarker(state, readStateMarker(raw)), issues: issues };
 }
 
 /** Deep copy of a state (used when a node is copied). */
 export function cloneState(state) {
-    return {
+    // A copy is an independent state, so it gets its own marker.
+    return attachStateMarker({
         version: state.version,
         active_id: state.active_id,
         tabs: state.tabs.map((tab) => ({
@@ -186,7 +239,7 @@ export function cloneState(state) {
             title: tab.title,
             content: tab.content,
         })),
-    };
+    });
 }
 
 /** Find a tab by id. */

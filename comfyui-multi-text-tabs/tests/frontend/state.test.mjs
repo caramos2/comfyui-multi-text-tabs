@@ -251,6 +251,40 @@ test("cloneState is a deep copy", () => {
     assert.equal(copy.tabs[0].id, state.tabs[0].id);
 });
 
+/* ---------------------------------------------------------------- marker */
+
+test("defaultState carries a marker", () => {
+    const state = S.defaultState();
+    assert.ok(S.readStateMarker(state));
+});
+
+test("the marker never reaches the workflow file", () => {
+    const state = S.defaultState();
+    const saved = JSON.parse(JSON.stringify(state));
+    assert.ok(!(S.STATE_MARKER in saved));
+});
+
+test("normalizeState keeps the marker of the state it repairs", () => {
+    const original = S.defaultState();
+    const { state } = S.normalizeState(original, "");
+    assert.equal(S.readStateMarker(state), S.readStateMarker(original));
+});
+
+test("normalizeState mints a marker for a state without one", () => {
+    const { state } = S.normalizeState({
+        version: 1,
+        tabs: [{ id: "a", title: "A", content: "" }],
+    }, "");
+    assert.ok(S.readStateMarker(state));
+});
+
+test("cloneState is an independent state with its own marker", () => {
+    const state = S.defaultState();
+    const copy = S.cloneState(state);
+    assert.ok(S.readStateMarker(copy));
+    assert.notEqual(S.readStateMarker(copy), S.readStateMarker(state));
+});
+
 /* ------------------------------------------------------------------ run */
 
 let failed = 0;

@@ -25,6 +25,7 @@ import {
     getActiveTab,
     getTab,
     normalizeState,
+    readStateMarker,
     renameTab,
     setActiveTab,
     setActiveContent,
@@ -64,6 +65,9 @@ class MultiTextTabsController {
         this.widget = null;
         this.undoTimer = null;
         this.undoPayload = null;
+        // The state object this controller owns. node.properties holds the
+        // very same object, the frontend only reads it through a proxy.
+        this.canonical = null;
 
         this.root = document.createElement("div");
         this.root.className = "mtt-root";
@@ -122,20 +126,45 @@ class MultiTextTabsController {
      */
     state() {
         const stored = this.node.properties ? this.node.properties[STORAGE_KEY] : undefined;
-        // Fast path: the state was already validated and nothing replaced it.
-        if (stored && stored === this.validatedState) {
-            return stored;
+        // The frontend keeps node.properties inside a Vue reactive object, so
+        // reading it back gives a proxy instead of the object we wrote. Object
+        // identity therefore never matches and the state has to be identified
+        // by its marker instead.
+        if (this.canonical) {
+            const storedMarker = readStateMarker(stored);
+            if (storedMarker && storedMarker === readStateMarker(this.canonical)) {
+                return this.canonical;
+            }
+            if (!stored) {
+                // The property was removed - put our state back.
+                this.writeState(this.canonical);
+                return this.canonical;
+            }
+            // The state was replaced from the outside (workflow load, copy or
+            // undo): adopt the new one.
+            this.canonical = null;
         }
         const result = normalizeState(stored, this.editor.value);
+        this.canonical = result.state;
+        this.writeState(this.canonical);
+        // "no stored state" is the normal start of a fresh node, not a repair.
+        const notes = result.issues.filter((issue) => issue !== "no stored state");
+        if (notes.length) {
+            console.warn("[Multi-Text Tabs] repaired tab state:", notes.join("; "));
+        }
+        return this.canonical;
+    }
+
+    /**
+     * Store the state in node.properties, which stays the single source of
+     * truth. The object that is written is the one this controller owns, so
+     * every change that is made to it is visible in the workflow file.
+     */
+    writeState(state) {
         if (!this.node.properties) {
             this.node.properties = {};
         }
-        this.node.properties[STORAGE_KEY] = result.state;
-        this.validatedState = result.state;
-        if (result.issues.length) {
-            console.warn("[Multi-Text Tabs] repaired tab state:", result.issues.join("; "));
-        }
-        return result.state;
+        this.node.properties[STORAGE_KEY] = state;
     }
 
     /** Copy the live editor text into the active tab. */
@@ -238,22 +267,26 @@ class MultiTextTabsController {
         if (!getTab(state, id) || state.active_id === id) {
             return;
         }
-        // Commit whatever is in the editor before the active tab changes.
-        this.flushActive();
-        setActiveTab(state, id);
-        this.loadActiveIntoEditor();
-        this.render();
-        this.scrollActiveIntoView();
+        this.withChangeTracking(() => {
+            // Commit whatever is in the editor before the active tab changes.
+            this.flushActive();
+            setActiveTab(state, id);
+            this.loadActiveIntoEditor();
+            this.render();
+            this.scrollActiveIntoView();
+        });
         this.notifyWidgetChanged();
     }
 
     addNewTab() {
         const state = this.state();
-        this.flushActive();
-        const tab = addTab(state, {});
-        this.editor.value = tab.content;
-        this.render();
-        this.scrollActiveIntoView();
+        this.withChangeTracking(() => {
+            this.flushActive();
+            const tab = addTab(state, {});
+            this.editor.value = tab.content;
+            this.render();
+            this.scrollActiveIntoView();
+        });
         this.focusEditor();
         this.notifyWidgetChanged();
     }
@@ -264,11 +297,21 @@ class MultiTextTabsController {
         if (!target) {
             return;
         }
-        // Capture a pending edit of the tab that is about to disappear.
-        this.flushActive();
-        const result = closeTab(state, id);
-        if (!result.closed) {
-            if (result.reason === "last tab is kept") {
+        let result = null;
+        this.withChangeTracking(() => {
+            // Capture a pending edit of the tab that is about to disappear.
+            this.flushActive();
+            result = closeTab(state, id);
+            if (!result.closed) {
+                return;
+            }
+            if (result.activated) {
+                this.loadActiveIntoEditor();
+            }
+            this.render();
+        });
+        if (!result || !result.closed) {
+            if (result && result.reason === "last tab is kept") {
                 this.flash("至少保留一个标签");
             }
             return;
@@ -278,10 +321,6 @@ class MultiTextTabsController {
             this.undoPayload = { tab: result.removed, index: result.index };
             this.showNotice("已关闭 \u300c" + target.title + "\u300d", "撤销");
         }
-        if (result.activated) {
-            this.loadActiveIntoEditor();
-        }
-        this.render();
         this.notifyWidgetChanged();
     }
 
@@ -292,35 +331,47 @@ class MultiTextTabsController {
         const state = this.state();
         const { tab, index } = this.undoPayload;
         this.undoPayload = null;
-        const at = Math.min(index, state.tabs.length);
-        state.tabs.splice(at, 0, { id: tab.id, title: tab.title, content: tab.content });
-        state.active_id = tab.id;
-        this.loadActiveIntoEditor();
-        this.render();
+        this.withChangeTracking(() => {
+            const at = Math.min(index, state.tabs.length);
+            state.tabs.splice(at, 0, { id: tab.id, title: tab.title, content: tab.content });
+            state.active_id = tab.id;
+            this.loadActiveIntoEditor();
+            this.render();
+        });
         this.hideNotice();
         this.notifyWidgetChanged();
     }
 
     duplicateTabById(id) {
         const state = this.state();
-        this.flushActive();
-        const copy = duplicateTab(state, id);
-        if (!copy) {
-            return;
+        let copy = null;
+        this.withChangeTracking(() => {
+            this.flushActive();
+            copy = duplicateTab(state, id);
+            if (!copy) {
+                return;
+            }
+            this.loadActiveIntoEditor();
+            this.render();
+            this.scrollActiveIntoView();
+        });
+        if (copy) {
+            this.notifyWidgetChanged();
         }
-        this.loadActiveIntoEditor();
-        this.render();
-        this.scrollActiveIntoView();
-        this.notifyWidgetChanged();
     }
 
     renameTabById(id, title) {
         const state = this.state();
-        const renamed = renameTab(state, id, title);
-        if (!renamed) {
-            return;
+        let renamed = null;
+        this.withChangeTracking(() => {
+            renamed = renameTab(state, id, title);
+            if (renamed) {
+                this.render();
+            }
+        });
+        if (renamed) {
+            this.notifyWidgetChanged();
         }
-        this.render();
     }
 
     /* ------------------------------------------------------------------ */
@@ -468,11 +519,17 @@ class MultiTextTabsController {
     /* ------------------------------------------------------------------ */
 
     attachEvents() {
-        // Keep the canvas from starting a node drag or a link while the user
-        // works inside the widget.
+        // Capture phase: keep the canvas from starting a node drag or a graph
+        // zoom while the user works inside the widget.
         const stop = (event) => event.stopPropagation();
-        ["pointerdown", "mousedown", "dblclick", "wheel", "contextmenu"].forEach((name) => {
+        ["pointerdown", "mousedown", "wheel"].forEach((name) => {
             this.root.addEventListener(name, stop, true);
+        });
+        // Bubble phase: the handlers of the tab bar have to run first (double
+        // click renames, right click opens the menu). Stopping the event here
+        // keeps it away from the canvas afterwards.
+        ["dblclick", "contextmenu"].forEach((name) => {
+            this.root.addEventListener(name, stop);
         });
 
         this.editor.addEventListener("input", () => {
@@ -581,11 +638,53 @@ class MultiTextTabsController {
 
     /** Tell ComfyUI that the widget value changed. */
     notifyWidgetChanged() {
-        if (this.widget && typeof this.widget.callback === "function") {
+        if (this.widget) {
             try {
-                this.widget.callback(this.editor.value);
+                // Assigning the value runs options.setValue and the widget
+                // callback, which is how the frontend is told about the
+                // change. The text itself is read live from the editor.
+                this.widget.value = this.editor.value;
             } catch (error) {
                 console.warn("[Multi-Text Tabs] widget callback failed", error);
+            }
+        }
+        if (this.node && typeof this.node.setDirtyCanvas === "function") {
+            this.node.setDirtyCanvas(true, true);
+        }
+    }
+
+    /**
+     * Run a mutation and report the change to the frontend.
+     *
+     * The pattern is the one the frontend itself uses for structural node
+     * changes: before the change the canvas state is captured, after it the
+     * change is committed. Every step is optional, so the plugin also works
+     * in a frontend that does not know these hooks.
+     */
+    withChangeTracking(mutation) {
+        const graph = this.node ? this.node.graph : null;
+        const emit = (name) => {
+            if (graph && typeof graph.canvasAction === "function") {
+                graph.canvasAction((canvas) => {
+                    if (canvas && typeof canvas[name] === "function") {
+                        canvas[name]();
+                    }
+                });
+            }
+        };
+        if (graph && typeof graph.beforeChange === "function") {
+            graph.beforeChange();
+        }
+        emit("emitBeforeChange");
+        try {
+            mutation();
+        } finally {
+            if (graph && typeof graph.afterChange === "function") {
+                graph.afterChange();
+            }
+            emit("emitAfterChange");
+            if (this.node && typeof this.node.setDirtyCanvas === "function") {
+                this.node.setDirtyCanvas(true, true);
             }
         }
     }

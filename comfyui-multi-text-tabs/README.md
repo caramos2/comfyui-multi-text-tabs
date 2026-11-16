@@ -83,12 +83,25 @@ The workflow file is the only persistent storage. Nothing is kept in
 `localStorage` or `sessionStorage`, so a workflow can be shared, versioned and
 imported anywhere.
 
+The tab collection carries an internal marker that identifies it as one state
+instance. The marker is not enumerable, so it never shows up in the workflow
+file. It exists for a concrete reason: the frontend keeps `node.properties`
+inside a Vue reactive object, so reading a property back returns a proxy
+instead of the object that was written. Object identity therefore cannot be
+used to recognise "the same state", and without the marker every change would
+be written into an object the node no longer references.
+
 ## Compatibility
 
 | Item | Version |
 |---|---|
 | ComfyUI backend | tested with v0.45.0 |
 | ComfyUI frontend | tested with 1.58.5 |
+
+Tested end to end in a real browser: adding, switching, renaming (double
+click), the right click menu, saving a workflow and loading it back, and a
+`/prompt` round trip whose output matched the submitted text character by
+character.
 
 The frontend extension uses the documented extension API only:
 `app.registerExtension`, `beforeRegisterNodeDef`, `getCustomWidgets`,
@@ -100,14 +113,15 @@ or any other global object.
 The test suite needs neither a browser nor a running ComfyUI:
 
 ```
-python tests/test_nodes.py                     # backend contract
-node tests/frontend/state.test.mjs             # tab state manager
-node tests/frontend/check_extension.mjs        # extension against a fake DOM
+python tests/test_nodes.py                     #  8  backend contract
+node tests/frontend/state.test.mjs             # 31  tab state manager
+node tests/frontend/check_extension.mjs        # 25  extension against a fake DOM
 ```
 
 `check_extension.mjs` loads the shipped `web/multi_text_tabs.js` into a
 `node:vm` context with a bounded fake DOM, so the file that is tested is the
-file that ships.
+file that ships. It also reproduces the reactive `node.properties` of the real
+frontend, which is where the state identity bug of v1.0 lived.
 
 ## Troubleshooting
 

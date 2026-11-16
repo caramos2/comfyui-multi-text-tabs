@@ -486,6 +486,30 @@ function makeNode(comfyClass) {
     return node;
 }
 
+/**
+ * A minimal stand-in for the Vue reactive object the frontend uses for
+ * node.properties: reading a property returns a proxy of the stored object,
+ * never the object that was written.
+ *
+ * This is what broke the plugin in the real frontend - comparing states by
+ * object identity could never succeed, so every change was written into an
+ * object the node no longer referenced.
+ */
+function makeReactive(target, cache = new WeakMap()) {
+    return new Proxy(target, {
+        get(t, key, receiver) {
+            const value = Reflect.get(t, key, receiver);
+            if (value && typeof value === "object") {
+                if (!cache.has(value)) {
+                    cache.set(value, makeReactive(value, cache));
+                }
+                return cache.get(value);
+            }
+            return value;
+        },
+    });
+}
+
 /* ------------------------------------------------------------------ */
 /* checks                                                              */
 /* ------------------------------------------------------------------ */
@@ -777,6 +801,126 @@ check("tab titles are inserted as text, never as html", () => {
     const title = controller.tabsRow.querySelector(".mtt-tab-title");
     assert.equal(title.textContent, "<img src=x onerror=alert(1)>");
     assert.equal(title.children.length, 0, "no html nodes may be created from user text");
+});
+
+check("a reactive properties object does not lose tab changes", () => {
+    const node = makeNode();
+    node.properties = makeReactive(node.properties);
+    const widgets = extension.getCustomWidgets();
+    widgets.MULTI_TEXT_TABS_UI(node);
+    extension.nodeCreated(node);
+    const controller = node.__multiTextTabs;
+
+    controller.editor.value = "first";
+    controller.editor.dispatchEvent({ type: "input" });
+    controller.addNewTab();
+    controller.editor.value = "second";
+    controller.editor.dispatchEvent({ type: "input" });
+
+    const state = node.properties.multi_text_tabs;
+    assert.equal(state.tabs.length, 2, "the new tab must reach node.properties");
+    assert.equal(state.tabs[0].content, "first");
+    assert.equal(state.tabs[1].content, "second");
+    assert.equal(controller.tabsRow.querySelectorAll(".mtt-tab").length, 2);
+    assert.equal(controller.editor.value, "second");
+});
+
+check("a reactive properties object keeps a renamed tab", () => {
+    const node = makeNode();
+    node.properties = makeReactive(node.properties);
+    const widgets = extension.getCustomWidgets();
+    widgets.MULTI_TEXT_TABS_UI(node);
+    extension.nodeCreated(node);
+    const controller = node.__multiTextTabs;
+    const id = controller.state().tabs[0].id;
+
+    controller.renameTabById(id, " 角色设定 ");
+    assert.equal(node.properties.multi_text_tabs.tabs[0].title, "角色设定");
+});
+
+check("a reactive properties object keeps a closed tab closed", () => {
+    const node = makeNode();
+    node.properties = makeReactive(node.properties);
+    const widgets = extension.getCustomWidgets();
+    widgets.MULTI_TEXT_TABS_UI(node);
+    extension.nodeCreated(node);
+    const controller = node.__multiTextTabs;
+
+    controller.addNewTab();
+    controller.addNewTab();
+    assert.equal(node.properties.multi_text_tabs.tabs.length, 3);
+    const id = node.properties.multi_text_tabs.tabs[1].id;
+    controller.closeTabById(id);
+    assert.equal(node.properties.multi_text_tabs.tabs.length, 2);
+});
+
+check("a double click on a tab opens the inline rename input", () => {
+    const node = makeNode();
+    const widgets = extension.getCustomWidgets();
+    widgets.MULTI_TEXT_TABS_UI(node);
+    extension.nodeCreated(node);
+    const controller = node.__multiTextTabs;
+
+    controller.tabsRow.querySelector(".mtt-tab").dblclick();
+    assert.ok(
+        controller.tabsRow.querySelector("input.mtt-rename-input"),
+        "the rename input must open on a double click"
+    );
+});
+
+check("a right click on a tab opens the context menu", () => {
+    const node = makeNode();
+    const widgets = extension.getCustomWidgets();
+    widgets.MULTI_TEXT_TABS_UI(node);
+    extension.nodeCreated(node);
+    const controller = node.__multiTextTabs;
+
+    controller.tabsRow.querySelector(".mtt-tab").dispatchEvent({ type: "contextmenu" });
+    const menu = fakeDocument.body.querySelector(".mtt-menu");
+    assert.ok(menu, "the context menu must open on a right click");
+    assert.equal(menu.querySelectorAll(".mtt-menu-item").length, 3);
+    controller.closeMenu();
+});
+
+check("the state marker stays out of the workflow file", () => {
+    const node = makeNode();
+    const widgets = extension.getCustomWidgets();
+    widgets.MULTI_TEXT_TABS_UI(node);
+    extension.nodeCreated(node);
+    const controller = node.__multiTextTabs;
+    controller.addNewTab();
+
+    const saved = JSON.parse(JSON.stringify(node.properties));
+    assert.ok(saved.multi_text_tabs, "the tabs must be saved");
+    assert.ok(
+        !(stateModule.STATE_MARKER in saved.multi_text_tabs),
+        "the internal marker must not be written to the workflow"
+    );
+    assert.equal(Object.keys(saved.multi_text_tabs).length, 3);
+});
+
+check("a change is reported to the frontend", () => {
+    const node = makeNode();
+    const calls = [];
+    node.graph = {
+        beforeChange() { calls.push("before"); },
+        afterChange() { calls.push("after"); },
+        canvasAction(callback) {
+            callback({
+                emitBeforeChange() { calls.push("emitBefore"); },
+                emitAfterChange() { calls.push("emitAfter"); },
+            });
+        },
+    };
+    node.setDirtyCanvas = function () { calls.push("dirty"); };
+    const widgets = extension.getCustomWidgets();
+    widgets.MULTI_TEXT_TABS_UI(node);
+    extension.nodeCreated(node);
+
+    node.__multiTextTabs.addNewTab();
+    assert.ok(calls.includes("before"), "the change must be announced");
+    assert.ok(calls.includes("after"), "the change must be committed");
+    assert.ok(calls.includes("dirty"), "the canvas must be marked dirty");
 });
 
 /* ------------------------------------------------------------------ */

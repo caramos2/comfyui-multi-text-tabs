@@ -18,8 +18,12 @@ NODE_DISPLAY_NAME_MAPPINGS = {
 #: ComfyUI serves this directory at /extensions/comfyui-multi-text-tabs/
 WEB_DIRECTORY = "./web"
 
+#: 1.1 - 真机验收修复：状态身份判定、事件阶段、变更通知（后端与工作流格式未变）
+__version__ = "1.1"
+
 __all__ = [
     "NODE_CLASS_MAPPINGS",
     "NODE_DISPLAY_NAME_MAPPINGS",
     "WEB_DIRECTORY",
+    "__version__",
 ]
