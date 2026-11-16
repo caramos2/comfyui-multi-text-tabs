@@ -10,6 +10,8 @@ They also run under pytest:
     python -m pytest tests/test_nodes.py -q
 """
 
+import importlib
+import json
 import os
 import sys
 
@@ -19,15 +21,15 @@ sys.path.insert(0, _PACKAGE_DIR)
 # importable as well to import the package itself.
 sys.path.insert(0, os.path.dirname(_PACKAGE_DIR))
 
-from nodes import ACTIVE_CONTENT, MultiTextTabsNode  # noqa: E402
+from nodes import MAX_TEXTS, TEXTS, MultiTextTabsNode  # noqa: E402
 
 
 def test_input_shape():
     inputs = MultiTextTabsNode.INPUT_TYPES()
     assert set(inputs.keys()) == {"required"}
     required = inputs["required"]
-    assert list(required.keys()) == [ACTIVE_CONTENT]
-    spec_type, spec_options = required[ACTIVE_CONTENT]
+    assert list(required.keys()) == [TEXTS]
+    spec_type, spec_options = required[TEXTS]
     assert spec_type == "STRING"
     assert spec_options["multiline"] is True
     # The text must reach the backend exactly as typed.
@@ -36,14 +38,16 @@ def test_input_shape():
 
 
 def test_output_shape():
-    assert MultiTextTabsNode.RETURN_TYPES == ("STRING",)
-    assert MultiTextTabsNode.RETURN_NAMES == ("text",)
-    assert MultiTextTabsNode.FUNCTION == "get_text"
+    assert MultiTextTabsNode.RETURN_TYPES == ("STRING",) * MAX_TEXTS
+    assert MultiTextTabsNode.RETURN_NAMES == tuple(
+        "待命文本 %d" % (i + 1) for i in range(MAX_TEXTS)
+    )
+    assert MultiTextTabsNode.FUNCTION == "get_texts"
     assert MultiTextTabsNode.CATEGORY == "utils/text"
-    assert hasattr(MultiTextTabsNode, "get_text")
+    assert hasattr(MultiTextTabsNode, "get_texts")
 
 
-def test_text_is_returned_verbatim():
+def test_texts_are_returned_verbatim():
     node = MultiTextTabsNode()
     samples = [
         "",
@@ -54,35 +58,51 @@ def test_text_is_returned_verbatim():
         "brace {weight:1.5} stays literal",
         "tabs\tand\r\nwindows newlines",
     ]
-    for sample in samples:
-        assert node.get_text(sample) == (sample,)
+    payload = json.dumps(samples, ensure_ascii=False)
+    result = node.get_texts(payload)
+    assert list(result[: len(samples)]) == samples
 
 
-def test_empty_text_is_valid():
+def test_empty_is_valid():
     node = MultiTextTabsNode()
-    assert node.get_text("") == ("",)
+    assert node.get_texts("") == ("",) * MAX_TEXTS
+    assert node.get_texts("[]") == ("",) * MAX_TEXTS
 
 
-def test_none_becomes_empty_string():
+def test_none_becomes_empty_strings():
     node = MultiTextTabsNode()
-    assert node.get_text(None) == ("",)
+    assert node.get_texts(None) == ("",) * MAX_TEXTS
 
 
-def test_non_string_is_stringified():
+def test_malformed_json_is_taken_as_one_text():
     node = MultiTextTabsNode()
-    assert node.get_text(123) == ("123",)
+    result = node.get_texts("[not json")
+    assert result[0] == "[not json"
+    assert result[1] == ""
 
 
-def test_result_is_a_one_tuple():
+def test_plain_text_is_taken_as_one_text():
     node = MultiTextTabsNode()
-    result = node.get_text("x")
+    result = node.get_texts("just a prompt")
+    assert result[0] == "just a prompt"
+    assert result[1] == ""
+
+
+def test_non_string_items_are_stringified():
+    node = MultiTextTabsNode()
+    result = node.get_texts(json.dumps([123, None, True]))
+    assert list(result[:3]) == ["123", "", "True"]
+
+
+def test_one_slot_per_output():
+    node = MultiTextTabsNode()
+    result = node.get_texts(json.dumps(["a", "b"]))
     assert isinstance(result, tuple)
-    assert len(result) == 1
+    assert len(result) == MAX_TEXTS
+    assert list(result[:4]) == ["a", "b", "", ""]
 
 
 def test_package_exports():
-    import importlib
-
     # The package directory name contains dashes; importlib resolves such
     # names through the path finder just fine.
     package = importlib.import_module("comfyui-multi-text-tabs")

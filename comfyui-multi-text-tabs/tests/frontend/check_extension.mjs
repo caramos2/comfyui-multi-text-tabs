@@ -452,7 +452,16 @@ function makeNode(comfyClass) {
         type: comfyClass || "MultiTextTabs",
         properties: {},
         widgets: [],
+        outputs: [{ name: "text", type: "STRING", links: [] }],
         size: [300, 200],
+        addOutput(name, type) {
+            const output = { name, type, links: [] };
+            this.outputs.push(output);
+            return output;
+        },
+        removeOutput(index) {
+            this.outputs.splice(index, 1);
+        },
         constructor: { comfyClass: comfyClass || "MultiTextTabs" },
         setSize(size) {
             this.size = size;
@@ -522,11 +531,11 @@ function check(name, fn) {
 check("the input is re-declared as the custom widget type", () => {
     const nodeData = {
         name: "MultiTextTabs",
-        input: { required: { active_content: ["STRING", { default: "", multiline: true }] } },
+        input: { required: { texts: ["STRING", { default: "", multiline: true }] } },
     };
     const nodeType = function () {};
     extension.beforeRegisterNodeDef(nodeType, nodeData);
-    assert.equal(nodeData.input.required.active_content[0], "MULTI_TEXT_TABS_UI");
+    assert.equal(nodeData.input.required.texts[0], "MULTI_TEXT_TABS_UI");
 });
 
 check("other nodes are not touched", () => {
@@ -539,24 +548,31 @@ check("other nodes are not touched", () => {
     assert.equal(JSON.stringify(nodeData), before);
 });
 
-check("the node owns exactly one widget named active_content", () => {
+check("the node owns exactly one widget named texts", () => {
     const node = makeNode();
     const widgets = extension.getCustomWidgets();
     const result = widgets.MULTI_TEXT_TABS_UI(node);
     assert.ok(result.widget);
-    assert.equal(result.widget.name, "active_content");
+    assert.equal(result.widget.name, "texts");
     assert.equal(node.widgets.length, 1);
-    assert.notEqual(result.widget.serialize, false);
+    // The texts live in node.properties, so the widget value must not be
+    // written into the workflow file - but it has to reach the backend.
+    assert.equal(result.widget.serialize, false);
+    assert.equal(result.widget.options.serialize, true);
     assert.equal(result.widget.options.socketless, true);
 });
 
-check("the widget value is the live editor text", () => {
+check("the widget value carries every text as json", () => {
     const node = makeNode();
     const widgets = extension.getCustomWidgets();
     const { widget } = widgets.MULTI_TEXT_TABS_UI(node);
     const controller = node.__multiTextTabs;
     controller.editor.value = "hello world";
-    assert.equal(widget.value, "hello world");
+    controller.editor.dispatchEvent({ type: "input" });
+    controller.addNewTab();
+    controller.editor.value = "second";
+    controller.editor.dispatchEvent({ type: "input" });
+    assert.deepEqual(JSON.parse(widget.value), ["hello world", "second"]);
 });
 
 check("a fresh node starts with a single empty tab", () => {
@@ -567,7 +583,7 @@ check("a fresh node starts with a single empty tab", () => {
     const state = node.properties.multi_text_tabs;
     assert.ok(state);
     assert.equal(state.tabs.length, 1);
-    assert.equal(state.tabs[0].title, "Text 1");
+    assert.equal(state.tabs[0].title, "待命文本 1");
     assert.equal(state.tabs[0].content, "");
     assert.equal(state.active_id, state.tabs[0].id);
 });
@@ -581,7 +597,7 @@ check("typing updates the active tab and the widget value", () => {
     controller.editor.value = "第一段\n第二段";
     controller.editor.dispatchEvent({ type: "input" });
     assert.equal(node.properties.multi_text_tabs.tabs[0].content, "第一段\n第二段");
-    assert.equal(widget.value, "第一段\n第二段");
+    assert.deepEqual(JSON.parse(widget.value), ["第一段\n第二段"]);
 });
 
 check("switching tabs flushes the editor and loads the other text", () => {
@@ -624,7 +640,7 @@ check("switching away without an input event still keeps the last characters", (
     assert.equal(controller.editor.value, "typed but not dispatched");
 });
 
-check("adding a tab names it Text N and activates it", () => {
+check("adding a text names it 待命文本 N and activates it", () => {
     const node = makeNode();
     const widgets = extension.getCustomWidgets();
     widgets.MULTI_TEXT_TABS_UI(node);
@@ -634,8 +650,8 @@ check("adding a tab names it Text N and activates it", () => {
     controller.addNewTab();
     const state = node.properties.multi_text_tabs;
     assert.equal(state.tabs.length, 3);
-    assert.equal(state.tabs[1].title, "Text 2");
-    assert.equal(state.tabs[2].title, "Text 3");
+    assert.equal(state.tabs[1].title, "待命文本 2");
+    assert.equal(state.tabs[2].title, "待命文本 3");
     assert.equal(state.active_id, state.tabs[2].id);
 });
 
@@ -748,10 +764,11 @@ check("the state survives a save and load round trip", () => {
     controller.editor.value = "second";
     controller.editor.dispatchEvent({ type: "input" });
 
-    // What the frontend writes into the workflow file.
+    // What the frontend writes into the workflow file. The texts live in
+    // the properties - the widget value is not written a second time.
     const saved = {
         properties: JSON.parse(JSON.stringify(node.properties)),
-        widgets_values: [node.widgets[0].value],
+        widgets_values: [],
     };
 
     const restored = makeNode();
@@ -766,16 +783,20 @@ check("the state survives a save and load round trip", () => {
     assert.equal(state.tabs[0].content, "persisted");
     assert.equal(state.tabs[1].content, "second");
     assert.equal(restored.__multiTextTabs.editor.value, "second");
-    assert.equal(widget.value, "second");
+    assert.deepEqual(JSON.parse(widget.value), ["persisted", "second"]);
 });
 
-check("the widget restores its value from the workflow file", () => {
+check("the widget value is derived and never overwrites the editor", () => {
     const node = makeNode();
     const widgets = extension.getCustomWidgets();
     const { widget } = widgets.MULTI_TEXT_TABS_UI(node);
     extension.nodeCreated(node);
+    const controller = node.__multiTextTabs;
+    controller.editor.value = "typed";
+    controller.editor.dispatchEvent({ type: "input" });
     widget.value = "from workflow";
-    assert.equal(node.__multiTextTabs.editor.value, "from workflow");
+    assert.equal(controller.editor.value, "typed");
+    assert.deepEqual(JSON.parse(widget.value), ["typed"]);
 });
 
 check("removing the node cleans up the document listener", () => {
@@ -921,6 +942,51 @@ check("a change is reported to the frontend", () => {
     assert.ok(calls.includes("before"), "the change must be announced");
     assert.ok(calls.includes("after"), "the change must be committed");
     assert.ok(calls.includes("dirty"), "the canvas must be marked dirty");
+});
+
+check("the node has one output socket per text", () => {
+    const node = makeNode();
+    const widgets = extension.getCustomWidgets();
+    widgets.MULTI_TEXT_TABS_UI(node);
+    extension.nodeCreated(node);
+    const controller = node.__multiTextTabs;
+
+    assert.equal(node.outputs.length, 1);
+    assert.equal(node.outputs[0].name, "待命文本 1");
+
+    controller.addNewTab();
+    assert.equal(node.outputs.length, 2);
+    assert.equal(node.outputs[1].name, "待命文本 2");
+    assert.equal(node.outputs[1].type, "STRING");
+
+    controller.renameTabById(controller.state().tabs[1].id, "镜头描述");
+    assert.equal(node.outputs[1].name, "镜头描述");
+
+    controller.closeTabById(controller.state().tabs[1].id);
+    assert.equal(node.outputs.length, 1);
+    assert.equal(node.outputs[0].name, "待命文本 1");
+});
+
+check("the widget value is not written into the workflow file", () => {
+    const node = makeNode();
+    const widgets = extension.getCustomWidgets();
+    const { widget } = widgets.MULTI_TEXT_TABS_UI(node);
+    extension.nodeCreated(node);
+    assert.equal(widget.serialize, false, "the texts live in the properties only");
+    assert.equal(widget.options.serialize, true, "the value must reach the backend");
+});
+
+check("the node refuses more texts than the backend has outputs", () => {
+    const node = makeNode();
+    const widgets = extension.getCustomWidgets();
+    widgets.MULTI_TEXT_TABS_UI(node);
+    extension.nodeCreated(node);
+    const controller = node.__multiTextTabs;
+    for (let i = 0; i < 20; i += 1) {
+        controller.addNewTab();
+    }
+    assert.equal(controller.state().tabs.length, 16);
+    assert.equal(node.outputs.length, 16);
 });
 
 /* ------------------------------------------------------------------ */

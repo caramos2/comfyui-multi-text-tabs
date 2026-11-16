@@ -27,6 +27,7 @@ import {
     normalizeState,
     readStateMarker,
     renameTab,
+    renumberAutoTitles,
     setActiveTab,
     setActiveContent,
     tabTitles,
@@ -35,7 +36,13 @@ import {
 
 const NODE_TYPE = "MultiTextTabs";
 const WIDGET_TYPE = "MULTI_TEXT_TABS_UI";
-const INPUT_NAME = "active_content";
+const INPUT_NAME = "texts";
+
+/**
+ * Upper bound of texts per node - the backend has one STRING output per text.
+ * Must match MAX_TEXTS in nodes.py.
+ */
+const MAX_TEXTS = 16;
 
 const UNDO_TIMEOUT_MS = 8000;
 
@@ -194,6 +201,7 @@ class MultiTextTabsController {
         const state = this.state();
         this.renderTabs(state);
         this.renderStatus(state);
+        this.syncOutputs();
     }
 
     renderTabs(state) {
@@ -232,6 +240,41 @@ class MultiTextTabsController {
         return item;
     }
 
+    /**
+     * Make the output sockets match the texts.
+     *
+     * One socket per 待命文本, named after it, so the wiring on the right side
+     * tells which string goes where. The socket order is the tab order, which
+     * is the order the backend returns the texts in.
+     */
+    syncOutputs() {
+        const state = this.state();
+        const titles = state.tabs.map((tab) => tab.title);
+        const node = this.node;
+        while (node.outputs.length > titles.length) {
+            node.removeOutput(node.outputs.length - 1);
+        }
+        titles.forEach((title, index) => {
+            if (index >= node.outputs.length) {
+                node.addOutput(title, "STRING");
+            } else {
+                const output = node.outputs[index];
+                if (output.name !== title) {
+                    output.name = title;
+                }
+                if (output.type !== "STRING") {
+                    output.type = "STRING";
+                }
+            }
+        });
+        // The sockets need room of their own.
+        const wanted = Math.max(320, 200 + titles.length * 20);
+        if (!node.size || node.size[1] < wanted) {
+            node.setSize([node.size ? node.size[0] : 420, wanted]);
+        }
+        node.setDirtyCanvas?.(true, true);
+    }
+
     renderStatus(state) {
         const active = getActiveTab(state);
         this.status.textContent = "";
@@ -240,7 +283,7 @@ class MultiTextTabsController {
         }
         const label = document.createElement("span");
         label.className = "mtt-status-label";
-        label.textContent = "当前标签：";
+        label.textContent = "当前待命文本：";
         const name = document.createElement("span");
         name.className = "mtt-status-name";
         name.textContent = active.title;
@@ -280,6 +323,10 @@ class MultiTextTabsController {
 
     addNewTab() {
         const state = this.state();
+        if (state.tabs.length >= MAX_TEXTS) {
+            this.flash("最多 " + MAX_TEXTS + " 条待命文本");
+            return;
+        }
         this.withChangeTracking(() => {
             this.flushActive();
             const tab = addTab(state, {});
@@ -305,6 +352,8 @@ class MultiTextTabsController {
             if (!result.closed) {
                 return;
             }
+            // The automatically named texts stay consecutive.
+            renumberAutoTitles(state);
             if (result.activated) {
                 this.loadActiveIntoEditor();
             }
@@ -642,8 +691,8 @@ class MultiTextTabsController {
             try {
                 // Assigning the value runs options.setValue and the widget
                 // callback, which is how the frontend is told about the
-                // change. The text itself is read live from the editor.
-                this.widget.value = this.editor.value;
+                // change. The value is derived from the tab state.
+                this.widget.value = this.getTextsJson();
             } catch (error) {
                 console.warn("[Multi-Text Tabs] widget callback failed", error);
             }
@@ -693,15 +742,28 @@ class MultiTextTabsController {
     /* widget bridge                                                       */
     /* ------------------------------------------------------------------ */
 
+    /** The text of the active tab - what the editor shows. */
     getText() {
         return this.editor.value;
     }
 
-    setText(value) {
-        const text = typeof value === "string" ? value : "";
-        if (this.editor.value !== text) {
-            this.editor.value = text;
-        }
+    /**
+     * Every text of the node as a JSON array.
+     *
+     * This is the value that goes to the backend: one entry per 待命文本, in
+     * tab order, so output i carries text i.
+     */
+    getTextsJson() {
+        const state = this.state();
+        return JSON.stringify(state.tabs.map((tab) => tab.content));
+    }
+
+    /**
+     * The widget value is derived from the tab state, so restoring it must
+     * never touch the editor - the editor follows the tab state instead.
+     */
+    setText() {
+        // intentionally empty
     }
 
     dispose() {
@@ -751,12 +813,18 @@ app.registerExtension({
 
                 const widget = node.addDOMWidget(INPUT_NAME, "multiTextTabs", controller.root, {
                     socketless: true,
+                    // options.serialize decides whether the value goes into the
+                    // execution request - it must.
                     serialize: true,
                     hideOnZoom: false,
-                    getValue: () => controller.getText(),
+                    getValue: () => controller.getTextsJson(),
                     setValue: (value) => controller.setText(value),
                     getMinHeight: () => 140,
                 });
+                // widget.serialize decides whether the value goes into the
+                // workflow file. The texts live in node.properties, so the
+                // widget must not write them a second time.
+                widget.serialize = false;
                 controller.widget = widget;
                 return { widget };
             },

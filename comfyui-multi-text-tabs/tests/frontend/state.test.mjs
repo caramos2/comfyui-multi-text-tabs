@@ -26,7 +26,7 @@ test("defaultState holds one empty tab", () => {
     const state = S.defaultState();
     assert.equal(state.version, S.SCHEMA_VERSION);
     assert.equal(state.tabs.length, 1);
-    assert.equal(state.tabs[0].title, "Text 1");
+    assert.equal(state.tabs[0].title, "待命文本 1");
     assert.equal(state.tabs[0].content, "");
     assert.equal(state.active_id, state.tabs[0].id);
 });
@@ -114,7 +114,7 @@ test("normalizeState trims titles and fills empty ones", () => {
         tabs: [{ id: "a", title: "  Spaced  ", content: "" }, { id: "b", title: "   ", content: "" }],
     }, "");
     assert.equal(state.tabs[0].title, "Spaced");
-    assert.equal(state.tabs[1].title, "Text 2");
+    assert.equal(state.tabs[1].title, "待命文本 2");
 });
 
 test("normalizeState gives a tab without id a new one", () => {
@@ -132,7 +132,7 @@ test("addTab creates a unique id and activates the tab", () => {
     const tab = S.addTab(state, {});
     assert.equal(state.tabs.length, 2);
     assert.equal(state.active_id, tab.id);
-    assert.equal(tab.title, "Text 2");
+    assert.equal(tab.title, "待命文本 2");
     assert.equal(tab.content, "");
     assert.notEqual(state.tabs[0].id, state.tabs[1].id);
 });
@@ -164,13 +164,13 @@ test("renameTab trims, falls back and keeps content", () => {
 test("renameTab rejects an empty name by keeping the old one", () => {
     const state = S.defaultState();
     const renamed = S.renameTab(state, state.tabs[0].id, "   ");
-    assert.equal(renamed.title, "Text 1");
+    assert.equal(renamed.title, "待命文本 1");
 });
 
 test("renameTab makes the name unique", () => {
     const state = S.defaultState();
     const second = S.addTab(state, {});
-    S.renameTab(state, second.id, "Text 1");
+    S.renameTab(state, second.id, "待命文本 1");
     assert.notEqual(state.tabs[1].title, state.tabs[0].title);
 });
 
@@ -247,7 +247,7 @@ test("cloneState is a deep copy", () => {
     copy.tabs[0].content = "changed";
     copy.tabs[0].title = "Renamed";
     assert.equal(state.tabs[0].content, "text");
-    assert.equal(state.tabs[0].title, "Text 1");
+    assert.equal(state.tabs[0].title, "待命文本 1");
     assert.equal(copy.tabs[0].id, state.tabs[0].id);
 });
 
@@ -283,6 +283,37 @@ test("cloneState is an independent state with its own marker", () => {
     const copy = S.cloneState(state);
     assert.ok(S.readStateMarker(copy));
     assert.notEqual(S.readStateMarker(copy), S.readStateMarker(state));
+});
+
+/* ------------------------------------------------------------- renumber */
+
+test("closing a text renumbers the automatically named ones", () => {
+    const state = S.defaultState();
+    const second = S.addTab(state, {});
+    S.addTab(state, {});
+    assert.equal(state.tabs[2].title, "待命文本 3");
+    S.closeTab(state, second.id);
+    S.renumberAutoTitles(state);
+    assert.equal(state.tabs[0].title, "待命文本 1");
+    assert.equal(state.tabs[1].title, "待命文本 2");
+});
+
+test("a text the user renamed keeps its own name", () => {
+    const state = S.defaultState();
+    S.addTab(state, {});
+    S.renameTab(state, state.tabs[1].id, "镜头描述");
+    S.closeTab(state, state.tabs[0].id);
+    S.renumberAutoTitles(state);
+    assert.equal(state.tabs[0].title, "镜头描述");
+});
+
+test("renumbering does not touch a text the user renamed", () => {
+    const state = S.defaultState();
+    S.addTab(state, {});
+    S.renameTab(state, state.tabs[0].id, "角色设定");
+    S.renumberAutoTitles(state);
+    assert.equal(state.tabs[0].title, "角色设定");
+    assert.equal(state.tabs[1].title, "待命文本 2");
 });
 
 /* ------------------------------------------------------------------ run */

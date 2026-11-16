@@ -26,7 +26,7 @@ export const STORAGE_KEY = "multi_text_tabs";
 export const SCHEMA_VERSION = 1;
 
 /** Prefix used for automatically generated tab titles. */
-export const TITLE_PREFIX = "Text";
+export const TITLE_PREFIX = "待命文本";
 
 /** Longest title that is kept in the data (display is truncated further). */
 export const MAX_TITLE_LENGTH = 120;
@@ -226,6 +226,26 @@ export function normalizeState(raw, fallbackContent) {
     }
     // A repaired state is still the same state, so it keeps its marker.
     return { state: attachStateMarker(state, readStateMarker(raw)), issues: issues };
+}
+
+/**
+ * Renumber the automatically named texts so that they stay consecutive.
+ *
+ * Only titles that still look like "待命文本 3" are touched - a text the user
+ * renamed keeps its own name.
+ */
+export function renumberAutoTitles(state) {
+    const pattern = new RegExp("^" + TITLE_PREFIX + "\\s+\\d+$");
+    state.tabs.forEach((tab, index) => {
+        if (typeof tab.title === "string" && pattern.test(tab.title.trim())) {
+            // The n-th text of the list is called "待命文本 n".
+            const wanted = TITLE_PREFIX + " " + (index + 1);
+            if (tab.title.trim() !== wanted) {
+                tab.title = wanted;
+            }
+        }
+    });
+    return state;
 }
 
 /** Deep copy of a state (used when a node is copied). */
