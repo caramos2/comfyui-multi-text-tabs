@@ -1,0 +1,483 @@
+
+COMFYUI CUSTOM NODE
+Multi-Text Tabs
+多文本标签节点：技术蓝图与开发实施计划
+把多个独立文本收纳进一个 ComfyUI 节点：顶部标签切换、一个编辑区、一个标准 STRING 输出。
+┌────────────────────────────────────────────────────────────┐
+│  Multi-Text Tabs     [Text 1] [Text 2] [Text 3]   [+]      │
+├────────────────────────────────────────────────────────────┤
+│  当前标签：Text 2                                          │
+│  A cinematic close-up, soft rim light, detailed fabric...   │
+│  ...                                                        │
+└────────────────────────────────────────────────────────────┘
+|
+文档用途： 可直接交给 Codex / Claude Code / 本地 Agent 作为立项说明、架构约束、开发任务拆解与验收依据。
+版本：v1.0    |    日期：2026 年 11 月 15 日    |    项目类型：ComfyUI 自定义节点插件
+
+1. 项目目标与产品定义
+本项目开发一个新的 ComfyUI 文本节点。它不是把多个 STRING 输出口堆在同一个节点上，而是把多份可独立编辑、可长期保存的文本放入同一个标签容器。用户通过顶部标签栏切换文本，点击“+”创建新标签，编辑区始终只显示当前选中的文本。
+| 核心产品定义
+一个节点 = 多个文本仓库 + 一个当前文本编辑器 + 一个 STRING 输出。执行时只输出当前活动标签的文本；未选中的标签仅作为节点内部素材保存。
+|
+
+1.1 目标体验
+节点创建后默认有一个标签：Text 1。
+点击顶部标签即可切换；切换前自动保存当前编辑内容，切换后载入目标标签内容。
+点击“+”立即创建新标签并切换过去，默认命名 Text N，内容为空。
+支持关闭、重命名、复制标签；至少保留一个标签。
+工作流保存、关闭 ComfyUI、重新打开、复制节点、复制工作流后，标签名称、文本、当前选中标签均应恢复。
+输出端只有一个标准 STRING，始终输出当前活动标签内容，兼容现有文本管线。
+1.2 非目标（首个版本不做）
+不做多个 STRING 输出端口，也不为每个标签动态创建 socket。
+不做节点之间的共享文本库、跨节点引用或远程同步。
+不把它做成完整 Flowith 无限画布；本项目仅聚焦“单节点多文本收纳”。
+不在首版加入富文本、Markdown 预览、变量面板或复杂模板管理。编辑内容仍是普通纯文本。
+2. 最终界面与交互规格
+区域
+| 规格
+| 行为 / 规则
+|
+节点标题区
+| 节点名称：Multi-Text Tabs
+| 保留 ComfyUI 原生节点标题与移动、折叠、缩放行为。
+|
+标签栏
+| 位于标题栏下方；横向排列标签与 +
+| 活动标签有明确高亮；标签过多时横向滚动，不把节点无限撑宽。
+|
+标签项
+| 显示短标题，如 Text 1 / 角色设定
+| 单击切换；悬停显示关闭 ×；双击或菜单重命名。
+|
+编辑区
+| 一个多行 STRING 编辑器
+| 显示且仅显示活动标签内容；自动随节点宽度变化；允许纵向调整节点高度。
+|
+输出区
+| 一个 STRING 输出口 text
+| 始终输出活动标签内容，不输出 JSON 或全部标签拼接内容。
+|
+空状态
+| 空文本也属于有效内容
+| 空标签可切换、保存并输出空字符串。
+|
+
+2.1 交互细则
+操作
+| 预期结果
+| 边界情况
+|
+点击标签
+| 先提交当前编辑器内容，再切换活动标签并显示其文本。
+| 切换前必须 flush 当前 textarea，防止最后几次输入丢失。
+|
+点击 +
+| 创建新标签、赋予唯一 ID、命名 Text N、内容为空，并立即激活。
+| 新标签插入当前标签之后或末尾；建议末尾，行为简单可预测。
+|
+关闭标签 ×
+| 关闭目标标签；若关闭的是活动标签，则切换到相邻标签。
+| 至少保留一个标签；关闭非空标签前二次确认或提供撤销。
+|
+重命名
+| 修改标签标题，不影响文本内容与输出。
+| 名称去除首尾空白；空名称回退为 Text N；限制显示长度并用省略号展示。
+|
+复制标签
+| 复制标题与内容，创建新的独立 ID。
+| 复制后建议自动命名为“原名称 Copy”，并立即激活。
+|
+连续快速切换
+| 每次切换都保留各自最新文本。
+| 不能依赖异步延迟保存；切换前同步提交。
+|
+标签很多
+| 标签栏可横向滚动，自动把活动标签滚入可视范围。
+| 不为每个标签创建独立编辑器，只创建标签按钮。
+|
+
+2.2 建议的快捷交互（第二阶段）
+Ctrl + Tab：切换到下一个标签；Ctrl + Shift + Tab：切换到上一个标签。
+Ctrl + N：创建新标签；快捷键仅在节点获得焦点时响应，避免抢占浏览器快捷键。
+标签拖拽排序、标签右键菜单（重命名 / 复制 / 关闭 / 关闭其他标签）。
+3. 技术架构：推荐采用“节点属性保存标签 + 标准 Widget 输出当前文本”
+| 首选架构（推荐）
+全部标签数据与活动标签 ID 保存到前端节点的 properties 对象；当前活动文本同步到一个标准 STRING 多行 Widget。Python 后端只接收 active_content 并输出 STRING。首版不需要隐藏 JSON 输入。
+|
+
+3.1 为什么不把 tabs_data 作为隐藏后端输入
+你提供的初稿用 tabs_data JSON 字符串传输完整标签集合，再用 active_content 作为后端输出。这种方案可以实现，但会让“仅供界面保存”的数据进入执行输入模型，增加隐藏 Widget、提示词序列化和缓存管理负担。ComfyUI 当前前端明确区分工作流持久化与 API Prompt 序列化：widget.serialize 控制工作流保存，widget.options.serialize 控制是否进入执行请求。两者不能混为一谈。
+更进一步，ComfyUI 的节点序列化结构本身包含 properties 字段，可用于保存节点自己的界面状态。标签内容不需要进入后端执行输入；只需把活动文本交给 Python 节点。这样不活动的文本被编辑时，不会因为 tabs_data 改变而影响执行输入。
+3.2 数据流
+用户输入文本
+│
+▼
+前端活动编辑器（active_content STRING Widget）
+│  每次输入 / 切换 / 保存时同步
+▼
+node.properties.multi_text_tabs
+├── tabs[]：所有标签 ID、名称、内容
+└── active_id：当前活动标签 ID
+
+点击标签 / 点击 +
+│
+├── flush 当前 Widget 内容到活动标签
+├── 更新 active_id
+└── 把目标标签内容写回 active_content Widget
+│
+▼
+ComfyUI 执行请求
+│ 只提交 active_content
+▼
+Python 节点返回 (active_content,)
+│
+▼
+标准 STRING 输出口 → 下游节点
+|
+
+3.3 状态分层表
+数据
+| 保存位置
+| 进入后端执行请求？
+| 用途
+|
+所有标签标题与文本
+| node.properties.multi_text_tabs.tabs
+| 否
+| 完整工作流持久化、重新打开恢复。
+|
+活动标签 ID
+| node.properties.multi_text_tabs.active_id
+| 否
+| 恢复上次选中的标签。
+|
+当前活动文本
+| 标准 STRING Widget：active_content
+| 是
+| Python 节点输出；连接下游。
+|
+节点尺寸 / 位置
+| ComfyUI 原生节点数据
+| 由 ComfyUI 处理
+| 沿用原生工作流行为。
+|
+
+3.4 标签数据结构
+node.properties.multi_text_tabs = {
+"version": 1,
+"active_id": "tab_001",
+"tabs": [
+{
+"id": "tab_001",
+"title": "Text 1",
+"content": "第一份提示词内容"
+},
+{
+"id": "tab_002",
+"title": "Text 2",
+"content": "第二份提示词内容"
+}
+]
+}
+|
+
+字段约束：version 用于未来结构升级；id 必须唯一且稳定；title 是展示名称；content 必须是字符串；active_id 必须指向 tabs 中存在的条目。默认至少包含一个标签。
+4. 后端节点设计（Python）
+4.1 后端职责
+注册一个标准 ComfyUI 自定义节点。
+接收 active_content 这一项 STRING 输入。
+返回完全一致的字符串，不擅自拼接标签、修剪空白或执行提示词替换。
+不负责读取前端 properties；也不接收 tabs JSON。
+4.2 建议的节点接口
+class MultiTextTabsNode:
+@classmethod
+def INPUT_TYPES(cls):
+return {
+"required": {
+"active_content": (
+"STRING",
+{
+"default": "",
+"multiline": True,
+"dynamicPrompts": False
+}
+)
+}
+}
+
+RETURN_TYPES = ("STRING",)
+RETURN_NAMES = ("text",)
+FUNCTION = "get_text"
+CATEGORY = "utils/text"
+
+def get_text(self, active_content):
+return (active_content,)
+|
+
+说明：这是后端接口示意，Agent 实施时应按目标 ComfyUI 版本的节点注册规范调整，不要把它当成已经测试过的完整插件。dynamicPrompts=False 的目的是让文本内容保持原样；如果你希望保留 ComfyUI 动态提示词语法，可将其做成可配置选项。
+4.3 输出契约
+项目
+| 规定
+|
+返回类型
+| STRING
+|
+返回数量
+| 1
+|
+返回值
+| 当前活动标签的原始文本
+|
+空文本
+| 返回空字符串，不报错
+|
+多输出策略
+| 首版不提供；不把 JSON 或多个标签列表作为输出
+|
+
+5. 前端扩展设计（JavaScript）
+5.1 插件加载方式
+采用 ComfyUI 官方 Extension 机制，在 Python 包中声明 WEB_DIRECTORY，由前端加载 web 目录脚本；JS 使用 app.registerExtension() 注册扩展，通过 beforeRegisterNodeDef / loadedGraphNode 等钩子只处理本项目节点。避免全局修改 LiteGraph / LGraphNode 原型。
+comfyui-multi-text-tabs/
+├── __init__.py
+├── nodes.py
+├── web/
+│   ├── multi_text_tabs.js
+│   └── multi_text_tabs.css   # 仅在采用 DOM/Vue 组件时需要
+└── README.md
+|
+
+5.2 前端模块划分
+模块
+| 职责
+| 关键要求
+|
+Node Adapter
+| 识别 MultiTextTabsNode 并挂载功能
+| 只修改该节点类型；保留原有 ComfyUI 回调。
+|
+State Manager
+| 读写 properties 中的 tabs 数据
+| 集中校验数据结构、ID、活动标签与版本。
+|
+Widget Bridge
+| 同步 active_content Widget 与当前标签内容
+| 输入时更新当前标签；切换前同步 flush；切换后更新 Widget。
+|
+Tab UI
+| 绘制 / 渲染标签与 + 按钮
+| 活动态、悬停态、关闭态、溢出滚动。
+|
+Lifecycle Handler
+| 节点创建、载入、复制、删除、保存
+| 处理默认状态、旧数据迁移、清理监听器。
+|
+
+5.3 Widget 同步规则（最重要）
+节点创建：若没有 multi_text_tabs，则创建 version=1、一个 Text 1 空标签；把该标签内容同步到 active_content。
+用户编辑：将编辑器当前值写入 active_content Widget，并同步写入活动标签的 content。不得只更新其中一处。
+切换标签：先读取 Widget 当前值并写入旧活动标签，再变更 active_id，最后把新活动标签的 content 写入 Widget。
+新增标签：先 flush 当前内容；创建唯一 ID；追加空内容标签；设为 active_id；Widget 清空。
+工作流保存：在 onSerialize 或对应保存生命周期中再次 flush 当前 Widget 到 properties，防止最后一刻输入尚未同步。
+工作流载入：恢复 properties；检查 active_id 是否存在；把活动标签内容与 Widget 值对齐；如果没有旧属性，使用现有 active_content 初始化 Text 1。
+| 一致性原则
+任何时刻都必须满足：active_content Widget 的值 = tabs[active_id].content。所有切换、保存、执行前都要确保此不变量成立。
+|
+
+5.4 标签栏渲染技术路线
+建议把 UI 渲染封装成独立 TabBar Adapter，不要让业务状态逻辑依赖某一种绘制 API。先验证当前 ComfyUI 前端版本的节点渲染模式，再选择具体实现：
+优先路线：使用当前前端支持的自定义 Widget / DOM Widget / Vue 渲染扩展能力，实现标签栏与原生 textarea 编辑器的组合。它更适合现代界面与文本输入交互。
+兼容路线：若当前部署仍使用经典 LiteGraph Canvas，可用节点级绘制回调绘制标签，并对标签区域做局部 hit-test；不得直接全局重写 onMouseDown 等原型。
+两条路线共用 State Manager、Widget Bridge 和 Python 后端。未来前端渲染变化时只替换 Tab UI Adapter。
+不建议把“直接改 LGraphNode 原型 + 手工定位 DOM textarea”作为唯一实现。ComfyUI 前端持续演进，官方扩展指南也强调使用扩展钩子、减少对核心对象的直接修改；现代 Vue Widget 渲染与旧版 DOM 访问习惯存在兼容风险。
+5.5 鼠标事件与命中区域
+仅在标签栏区域拦截点击；编辑器区域、节点标题栏、输出插槽和缩放手柄继续走 ComfyUI 原生行为。
+为每个可交互元素维护清晰 hitbox：标签本体、关闭 ×、新增 +、左右滚动区域。
+点击关闭按钮不能误触发标签切换；点击标签不能意外拖动节点。
+双击重命名建议使用 ComfyUI 兼容的对话框或轻量输入层，不直接依赖浏览器 prompt。
+6. 工作流持久化、复制与兼容性
+6.1 持久化策略
+标签集合保存在节点 properties 的固定键 multi_text_tabs 下。ComfyUI 前端的节点序列化结构包含 properties；活动文本则作为标准 Widget 值保存并进入执行请求。不要把标签正文放在 properties 的动态属性名中，也不要通过 innerHTML 插入用户文本。
+6.2 必须覆盖的状态场景
+场景
+| 预期结果
+| 实现检查点
+|
+Save / Load Workflow
+| 所有标签、标题、正文、当前选中标签恢复。
+| properties + widgets_values 在工作流 JSON 中一致。
+|
+刷新页面 / 重启 ComfyUI
+| 节点恢复到保存时状态。
+| onConfigure / loadedGraphNode 生命周期。
+|
+复制粘贴节点
+| 副本包含完整标签集合及当前文本。
+| properties 深拷贝；Widget 值与 active 标签同步。
+|
+复制整个工作流
+| 导入后内容完整。
+| 不依赖浏览器 session/localStorage。
+|
+旧版本节点升级
+| 没有 tabs 属性时自动迁移为一个标签。
+| version 字段与 migration 函数。
+|
+损坏或缺失状态
+| 安全恢复至少一个空标签。
+| 校验 JSON 结构、重复 ID、无效 active_id。
+|
+
+6.3 数据恢复与迁移规则
+properties 缺失：以 active_content 当前值创建 Text 1。
+tabs 为空或不是数组：重建一个空标签。
+active_id 不存在：选择第一项作为活动标签。
+重复 ID：为冲突标签重新分配 ID，不能把两份内容合并。
+content 不是字符串：安全转换为空字符串或 JSON 字符串，并记录控制台警告。
+未知 version：保留可读取字段，执行迁移或回退到安全默认状态，不让节点加载失败。
+7. 执行缓存、性能与边界设计
+7.1 执行缓存原则
+后端仅接收 active_content，因此只编辑非活动标签时，不应改变节点的执行输入；切换到另一标签后，active_content 改变，才构成新的执行输入。这里是把标签状态放入 properties 而非额外后端输入的核心价值。
+7.2 性能要求
+只渲染可视标签与当前编辑器，不为每个标签创建独立 textarea / Widget。
+标签数量增长时采用横向滚动、活动标签自动定位；不因标签数量而显著改变节点高度。
+建议以 1、10、50、100 个标签进行压力测试；100 个作为首轮软性能警戒点，不作为产品层面的强制上限。
+避免每次输入都重绘整个节点；状态更新应局限于当前标签和必要的 UI。
+7.3 文本行为
+默认保留换行、空格、标点与原始文本，不自动 trim。
+支持中英文、Emoji、长提示词和多段落文本。
+内容大小由 ComfyUI 工作流 JSON 承载；超大工作流可显示体积警告，但首版不偷偷截断文本。
+8. 开发阶段与交付拆分
+阶段
+| 开发任务
+| 阶段交付 / 完成条件
+|
+P0：前端可行性验证
+| 确认当前 ComfyUI 前端版本、渲染模式、扩展加载路径；验证节点 properties 保存与加载；验证自定义标签 UI 挂载方式。
+| 最小验证节点：一个 STRING 编辑器 + 可点击标签条；保存/重载不丢状态。
+|
+P1：后端最小节点
+| 完成 Python 节点注册、单 STRING 输入、单 STRING 输出。
+| 可被 ComfyUI 搜索到；连接下游能收到当前文本。
+|
+P2：标签核心逻辑
+| 新增、切换、关闭、重命名；State Manager 与 Widget Bridge。
+| 多标签编辑稳定；切换 20 次无内容错位或丢失。
+|
+P3：持久化与复制
+| 保存/载入、刷新、节点复制粘贴、工作流复制、旧数据迁移。
+| 全部状态测试通过；工作流 JSON 中可找到 properties 标签状态。
+|
+P4：UI 打磨
+| 横向滚动、关闭确认、复制标签、空状态、焦点、快捷键。
+| 交互自然；不干扰节点移动、缩放、连线。
+|
+P5：发布与文档
+| README、安装说明、版本兼容说明、已知问题、测试工作流。
+| 形成可独立安装的 custom_nodes 插件目录。
+|
+
+8.1 建议的文件职责
+文件
+| 职责
+|
+__init__.py
+| 导出 NODE_CLASS_MAPPINGS、NODE_DISPLAY_NAME_MAPPINGS、WEB_DIRECTORY。
+|
+nodes.py
+| Python 节点接口与纯文本返回逻辑；不存储标签列表。
+|
+web/multi_text_tabs.js
+| 扩展注册、节点识别、状态管理、Widget 同步、生命周期。
+|
+web/multi_text_tabs.css
+| 仅当采用 DOM/Vue 标签 UI 时提供样式。
+|
+README.md
+| 安装、功能、兼容性、使用方法、故障排查。
+|
+tests/ 或 fixtures/（可选）
+| 保存/载入用例、旧版本 properties 样例、压力测试数据。
+|
+
+9. 验收标准（Definition of Done）
+☐  节点能正常加载，重启后不报 Python 导入错误或前端 JS 错误。
+☐  初始创建时只有 Text 1，点击 + 可连续创建多个标签。
+☐  每个标签的内容完全独立；切换标签不会覆盖其他标签文本。
+☐  切换前最后输入的字符、换行和空格均能保存。
+☐  关闭活动标签后能切换到合理的相邻标签；永远至少保留一个标签。
+☐  重命名和复制标签不会改变其他标签内容。
+☐  保存工作流、刷新页面、重新打开工作流后，所有标签与活动选择恢复。
+☐  复制粘贴节点后，副本保留完整标签内容且与原节点互不影响。
+☐  只修改非活动标签时，后端执行输入仍保持当前活动文本。
+☐  切换到另一标签后，下游 STRING 节点收到新活动文本。
+☐  编辑区支持长文本、多行、中文、Emoji；不截断、不丢字符。
+☐  标签很多时可横向滚动，节点尺寸和画布交互仍正常。
+☐  标签栏的点击不会意外拖动节点、触发连线或误操作关闭节点。
+☐  在目标前端模式下，标签 UI 不出现空白、错位、不可点击或 DOM 报错。
+10. 风险清单与规避措施
+风险
+| 可能表现
+| 规避策略
+|
+前端渲染版本差异
+| Canvas 回调在新渲染模式下行为变化，或 DOM Widget 不显示。
+| P0 先探测部署版本；Tab UI 与状态逻辑分层；至少测试目标 UI 模式。
+|
+Widget 与 properties 不一致
+| 切换标签或保存时丢失最后输入。
+| 建立 active_content = active_tab.content 不变量；切换前 flush；保存前再次同步。
+|
+回调覆盖原生行为
+| 节点不能拖动、点击标签失灵、输出口点击异常。
+| 只包装目标节点方法；保留并调用原回调；精确限制 hitbox。
+|
+复制粘贴数据丢失
+| 副本只有当前文本，没有其他标签。
+| 专门测试 clone→serialize→configure 流程；不要仅测试保存工作流。
+|
+标签数据损坏
+| 工作流加载异常或活动标签为空。
+| 使用 versioned schema、强校验、自动恢复与迁移。
+|
+不安全的 DOM 插入
+| 标签标题或正文被当作 HTML 解析。
+| 用 textContent / 安全文本节点；固定 properties 键名；禁止将用户文本拼入 innerHTML。
+|
+
+11. 给开发 Agent 的执行指令
+| 总指令
+先完成 P0 技术验证，再按 P1 → P5 实施。不要一上来就写复杂 UI。每完成一个阶段都要实际启动 ComfyUI 验证，不得仅凭静态代码推断成功。
+|
+
+先查看当前 ComfyUI 与前端版本，以及插件目录现有结构；确认 WEB_DIRECTORY、扩展加载和节点注册方式。
+做一个最小节点：一个 active_content STRING Widget + 一个 STRING 输出，确保能正常连接下游。
+验证节点 properties 的序列化 / 反序列化 / 节点复制粘贴。确认 multi_text_tabs 能保存且不会被 API prompt 当作输入。
+实现 State Manager 与 Widget Bridge，再实现标签新增、切换、关闭和重命名。
+根据当前前端渲染模式决定 Tab UI Adapter；不要把旧版 Canvas 绘制代码作为唯一方案。
+完成全部验收清单；提供完整插件目录、README、测试工作流和一份变更说明。
+11.1 Agent 不得违反的架构约束
+不得把全部文本拼接后输出；默认输出严格等于当前活动标签正文。
+不得把标签正文依赖 localStorage/sessionStorage；工作流文件必须是权威持久化来源。
+不得在 Python 后端重复存储前端标签数据；前后端职责必须分开。
+不得全局覆盖 LGraphNode.prototype 或其他核心原型来实现单个节点 UI。
+不得在切换标签时重建整个节点；只更新活动 ID 与文本 Widget。
+不得静默截断用户长文本；对异常状态应修复或提示。
+12. 官方资料与技术核对依据
+本蓝图按截至 2026-11-15 可查阅的 ComfyUI 官方前端 / 后端资料制定。开发 Agent 应在实施时再次核对当前分支接口。
+ComfyUI Frontend Extension Development Guide：扩展如何加载、WEB_DIRECTORY、app.registerExtension 与扩展钩子。
+https://github.com/Comfy-Org/ComfyUI_frontend/blob/main/docs/extensions/development.md
+ComfyUI Widget Serialization：区分 widget.serialize（工作流持久化）与 widget.options.serialize（API Prompt 输入）。
+https://github.com/Comfy-Org/ComfyUI_frontend/blob/main/docs/WIDGET_SERIALIZATION.md
+ComfyUI Serialisation Types：节点序列化结构含 properties、widgets_values 等字段。
+https://github.com/Comfy-Org/ComfyUI_frontend/blob/main/src/lib/litegraph/src/types/serialisation.ts
+ComfyUI Backend: Hidden and Flexible Inputs：后端 hidden 输入用于 PROMPT、EXTRA_PNGINFO、UNIQUE_ID 等上下文，不是任意自定义 JSON 输入的通用隐藏字段。
+https://github.com/Comfy-Org/docs/blob/main/custom-nodes/backend/more_on_inputs.mdx
+ComfyUI Frontend Core Extensions：官方扩展钩子与扩展设计原则，建议优先使用 hook、避免侵入核心对象。
+https://github.com/Comfy-Org/ComfyUI_frontend/blob/main/docs/extensions/core.md
+Frontend issue: Vue widget rendering regression (参考风险案例)：说明旧式 DOM / Widget 操作可能受新渲染架构影响；这属于兼容风险提示，不代表所有前端版本必然受影响。
+https://github.com/Comfy-Org/ComfyUI_frontend/issues/8852
+| 最终交付定义
+插件必须达到：单节点多标签编辑体验稳定；所有标签随工作流保存；执行时只输出当前活动文本；可复制粘贴；与指定 ComfyUI 前端版本兼容，并附带可复现的验收工作流。
+|
+

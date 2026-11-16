@@ -1,0 +1,225 @@
+/*
+ * Multi-Text Tabs - node styles.
+ *
+ * Everything is scoped under .mtt-* classes so the plugin cannot interfere
+ * with the rest of the ComfyUI interface.
+ */
+
+.mtt-root {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    box-sizing: border-box;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    padding: 2px;
+    font-size: 12px;
+    color: var(--fg-color, #ddd);
+}
+
+.mtt-bar {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+}
+
+.mtt-tabs {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: thin;
+    padding-bottom: 1px;
+}
+
+.mtt-tabs::-webkit-scrollbar {
+    height: 6px;
+}
+
+.mtt-tabs::-webkit-scrollbar-thumb {
+    background: var(--border-color, #4b4b4b);
+    border-radius: 3px;
+}
+
+.mtt-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    flex: 0 0 auto;
+    max-width: 160px;
+    padding: 2px 5px;
+    border: 1px solid var(--border-color, #4b4b4b);
+    border-radius: 4px;
+    background: var(--comfy-input-bg, #353535);
+    color: var(--fg-color, #ddd);
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+    transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+
+.mtt-tab:hover {
+    border-color: var(--input-text, #ccc);
+}
+
+.mtt-tab.mtt-active {
+    background: var(--comfy-menu-bg, #4a4a4a);
+    border-color: var(--input-text, #ccc);
+    font-weight: 600;
+}
+
+.mtt-tab-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 120px;
+}
+
+.mtt-tab-close {
+    display: inline-block;
+    width: 13px;
+    height: 13px;
+    line-height: 12px;
+    text-align: center;
+    border-radius: 3px;
+    font-size: 13px;
+    opacity: 0;
+    color: var(--fg-color, #ddd);
+    flex: 0 0 auto;
+}
+
+.mtt-tab:hover .mtt-tab-close,
+.mtt-tab.mtt-active .mtt-tab-close {
+    opacity: 0.65;
+}
+
+.mtt-tab-close:hover {
+    opacity: 1;
+    background: var(--comfy-error, #a33);
+    color: #fff;
+}
+
+.mtt-add {
+    flex: 0 0 auto;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    font-size: 14px;
+    line-height: 1;
+    border: 1px solid var(--border-color, #4b4b4b);
+    border-radius: 4px;
+    background: var(--comfy-input-bg, #353535);
+    color: var(--fg-color, #ddd);
+    cursor: pointer;
+}
+
+.mtt-add:hover {
+    border-color: var(--input-text, #ccc);
+}
+
+.mtt-status {
+    flex: 0 0 auto;
+    font-size: 11px;
+    opacity: 0.72;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 0 2px;
+}
+
+.mtt-status-name {
+    font-weight: 600;
+}
+
+.mtt-editor {
+    flex: 1 1 auto;
+    width: 100%;
+    min-height: 80px;
+    box-sizing: border-box;
+    resize: none;
+    padding: 6px 7px;
+    border: 1px solid var(--border-color, #4b4b4b);
+    border-radius: 4px;
+    background: var(--comfy-input-bg, #222);
+    color: var(--input-text, #ddd);
+    font-family: var(--font-mono, ui-monospace, Menlo, Consolas, monospace);
+    font-size: 12px;
+    line-height: 1.5;
+    overflow: auto;
+}
+
+.mtt-editor:focus {
+    outline: 1px solid var(--input-text, #ccc);
+    outline-offset: -1px;
+}
+
+.mtt-notice {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    padding: 1px 2px;
+    opacity: 0.85;
+}
+
+.mtt-notice[hidden] {
+    display: none;
+}
+
+.mtt-notice-action {
+    padding: 0 5px;
+    font-size: 11px;
+    border: 1px solid var(--border-color, #4b4b4b);
+    border-radius: 3px;
+    background: transparent;
+    color: var(--fg-color, #ddd);
+    cursor: pointer;
+}
+
+.mtt-notice-action:hover {
+    border-color: var(--input-text, #ccc);
+}
+
+.mtt-rename-input {
+    width: 110px;
+    font-size: 12px;
+    padding: 0 3px;
+    border: 1px solid var(--input-text, #ccc);
+    border-radius: 3px;
+    background: var(--comfy-input-bg, #222);
+    color: var(--input-text, #ddd);
+}
+
+.mtt-menu {
+    position: fixed;
+    z-index: 100000;
+    display: flex;
+    flex-direction: column;
+    min-width: 110px;
+    padding: 3px;
+    border: 1px solid var(--border-color, #4b4b4b);
+    border-radius: 5px;
+    background: var(--comfy-menu-bg, #2e2e2e);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+}
+
+.mtt-menu-item {
+    padding: 3px 8px;
+    text-align: left;
+    font-size: 12px;
+    border: none;
+    border-radius: 3px;
+    background: transparent;
+    color: var(--fg-color, #ddd);
+    cursor: pointer;
+}
+
+.mtt-menu-item:hover {
+    background: var(--comfy-menu-hover, #454545);
+}
