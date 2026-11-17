@@ -5,7 +5,7 @@
 ## 环境准备
 
 ```bash
-git clone https://github.com/caramos/comfyui-multi-text-tabs.git
+git clone https://github.com/caramos2/comfyui-multi-text-tabs.git
 cd ComfyUI/custom_nodes/comfyui-multi-text-tabs
 ```
 

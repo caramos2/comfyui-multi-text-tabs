@@ -13,7 +13,7 @@
 
 **请不要用公开 Issue 报告安全问题**，也**不要**在公开的 PR 或讨论里描述漏洞细节。
 
-请通过 GitHub 的 [私下报告漏洞](https://github.com/caramos/comfyui-multi-text-tabs/security/advisories/new) 功能提交（Security → Report a vulnerability）。
+请通过 GitHub 的 [私下报告漏洞](https://github.com/caramos2/comfyui-multi-text-tabs/security/advisories/new) 功能提交（Security → Report a vulnerability）。
 
 报告请包含：
 

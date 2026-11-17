@@ -54,7 +54,7 @@ ComfyUI/
 
 ```bash
 cd ComfyUI/custom_nodes
-git clone https://github.com/caramos/comfyui-multi-text-tabs.git
+git clone https://github.com/caramos2/comfyui-multi-text-tabs.git
 ```
 
 After the restart the node appears under the category **utils / text** as **Multi-Text Tabs**.
@@ -183,6 +183,6 @@ This project **contains no third-party code**. The frontend extension uses only 
 
 ## License
 
-[MIT](LICENSE) © 2026 caramos
+[MIT](LICENSE) © 2026 caramos2
 
 The project is licensed under the MIT License, including the standard "AS IS" warranty disclaimer: the software is provided as is, without warranty of any kind, and the authors are not liable for any claim, damages or other liability arising from the use of the software.

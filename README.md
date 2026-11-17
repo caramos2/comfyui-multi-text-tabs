@@ -57,7 +57,7 @@ ComfyUI/
 
 ```bash
 cd ComfyUI/custom_nodes
-git clone https://github.com/caramos/comfyui-multi-text-tabs.git
+git clone https://github.com/caramos2/comfyui-multi-text-tabs.git
 ```
 
 重启后，节点出现在分类 **utils / text** 下，显示名为 **Multi-Text Tabs**。
@@ -199,6 +199,6 @@ node tests/frontend/check_extension.mjs        # 31  假 DOM 端到端
 
 ## 许可证
 
-[MIT](LICENSE) © 2026 caramos
+[MIT](LICENSE) © 2026 caramos2
 
 本项目按 MIT 协议开源。许可证全文包含标准的 "AS IS" 声明与免责声明：软件按现状提供，不附带任何明示或默示担保，作者不对使用软件造成的任何损失承担责任。
