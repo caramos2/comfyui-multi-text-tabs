@@ -7,10 +7,14 @@
  *   Widget Bridge  -> this file, keeps widget value and tab state in sync
  *   Tab UI         -> this file, plain DOM inside a DOM widget
  *
- * The node keeps exactly one widget, named "active_content". It is a DOM
- * widget so that the tab bar can sit above the editor and so that the editor
- * value we hand to the backend is always the live text of the active tab -
- * there is no "last keystroke lost on switch" race.
+ * The node keeps exactly one widget, named "texts". It is a DOM widget so
+ * that the tab bar can sit above the editor and so that the editor value we
+ * hand to the backend is always the live text of the active tab - there is
+ * no "last keystroke lost on switch" race.
+ *
+ * The widget value is a JSON payload with every text and the index of the
+ * active one, so the backend can fill the main output with the text of the
+ * currently selected 待命文本.
  *
  * The full tab collection is stored in node.properties.multi_text_tabs and is
  * therefore part of the workflow file, not part of the execution prompt.
@@ -43,6 +47,13 @@ const INPUT_NAME = "texts";
  * Must match MAX_TEXTS in nodes.py.
  */
 const MAX_TEXTS = 16;
+
+/**
+ * Name of the output that carries the text of the currently selected text.
+ * It always sits behind the text outputs, so that the slot numbers of the
+ * text outputs never shift when a text is added or closed.
+ */
+const MAIN_OUTPUT = "主输出";
 
 const UNDO_TIMEOUT_MS = 8000;
 
@@ -246,33 +257,100 @@ class MultiTextTabsController {
      * One socket per 待命文本, named after it, so the wiring on the right side
      * tells which string goes where. The socket order is the tab order, which
      * is the order the backend returns the texts in.
+     *
+     * Behind the text sockets there is one more socket, the main output. It
+     * carries the text of the currently selected 待命文本, so a downstream
+     * node can be wired once and switched by clicking a tab.
+     *
+     * The main output always stays at the end. That keeps the slot numbers
+     * of the text outputs stable: the backend maps a link to an output by
+     * its slot number, never by its name.
      */
     syncOutputs() {
         const state = this.state();
         const titles = state.tabs.map((tab) => tab.title);
         const node = this.node;
-        while (node.outputs.length > titles.length) {
-            node.removeOutput(node.outputs.length - 1);
+
+        // The main output always exists.
+        if (node.outputs.length === 0) {
+            node.addOutput(MAIN_OUTPUT, "STRING");
         }
+
+        // Drop the sockets of texts that are gone. They sit right in front
+        // of the main output, which is never one of them.
+        while (node.outputs.length > titles.length + 1) {
+            // LiteGraph moves the links of the sockets behind the removed
+            // one to their new slot on its own.
+            node.removeOutput(titles.length);
+        }
+
         titles.forEach((title, index) => {
-            if (index >= node.outputs.length) {
-                node.addOutput(title, "STRING");
-            } else {
-                const output = node.outputs[index];
-                if (output.name !== title) {
-                    output.name = title;
-                }
-                if (output.type !== "STRING") {
-                    output.type = "STRING";
-                }
+            if (index === node.outputs.length - 1) {
+                // Only the main output is left: put the text socket in front.
+                this.insertOutput(index, title);
+                return;
+            }
+            const output = node.outputs[index];
+            if (output.name !== title) {
+                output.name = title;
+            }
+            if (output.type !== "STRING") {
+                output.type = "STRING";
             }
         });
+
+        const main = node.outputs[node.outputs.length - 1];
+        if (main.name !== MAIN_OUTPUT) {
+            main.name = MAIN_OUTPUT;
+        }
+        if (main.type !== "STRING") {
+            main.type = "STRING";
+        }
+
         // The sockets need room of their own.
         const wanted = Math.max(320, 200 + titles.length * 20);
         if (!node.size || node.size[1] < wanted) {
             node.setSize([node.size ? node.size[0] : 420, wanted]);
         }
         node.setDirtyCanvas?.(true, true);
+    }
+
+    /**
+     * Insert an output socket at a given position.
+     *
+     * LiteGraph only appends new outputs, so the socket is moved into place
+     * by hand. The links of this node that start behind that position have
+     * to move with it - otherwise the main output would keep the old slot
+     * number and would deliver the wrong text.
+     */
+    insertOutput(index, name) {
+        const node = this.node;
+        node.addOutput(name, "STRING");
+        const fresh = node.outputs.pop();
+        node.outputs.splice(index, 0, fresh);
+        this.shiftLinks(index, 1);
+    }
+
+    /**
+     * Move the links of this node that start at slot "from" by "delta".
+     *
+     * The frontend stores the slot number of a link inside the link and
+     * derives the "links" of a socket from it, so the number has to be
+     * corrected when a socket moves.
+     */
+    shiftLinks(from, delta) {
+        const node = this.node;
+        for (const link of allLinks(node.graph)) {
+            if (!link || typeof link.origin_slot !== "number") {
+                continue;
+            }
+            if (!belongsToNode(link, node)) {
+                continue;
+            }
+            if (link.origin_slot >= from) {
+                link.origin_slot += delta;
+            }
+        }
     }
 
     renderStatus(state) {
@@ -283,7 +361,7 @@ class MultiTextTabsController {
         }
         const label = document.createElement("span");
         label.className = "mtt-status-label";
-        label.textContent = "当前待命文本：";
+        label.textContent = "当前待命文本（主输出）：";
         const name = document.createElement("span");
         name.className = "mtt-status-name";
         name.textContent = active.title;
@@ -692,7 +770,7 @@ class MultiTextTabsController {
                 // Assigning the value runs options.setValue and the widget
                 // callback, which is how the frontend is told about the
                 // change. The value is derived from the tab state.
-                this.widget.value = this.getTextsJson();
+                this.widget.value = this.getTextsPayload();
             } catch (error) {
                 console.warn("[Multi-Text Tabs] widget callback failed", error);
             }
@@ -748,14 +826,17 @@ class MultiTextTabsController {
     }
 
     /**
-     * Every text of the node as a JSON array.
+     * Every text of the node plus the index of the active one.
      *
      * This is the value that goes to the backend: one entry per 待命文本, in
-     * tab order, so output i carries text i.
+     * tab order, so output i carries text i. The active index tells the
+     * backend which text the main output has to carry.
      */
-    getTextsJson() {
+    getTextsPayload() {
         const state = this.state();
-        return JSON.stringify(state.tabs.map((tab) => tab.content));
+        const texts = state.tabs.map((tab) => tab.content);
+        const active = state.tabs.findIndex((tab) => tab.id === state.active_id);
+        return JSON.stringify({ texts, active: active < 0 ? 0 : active });
     }
 
     /**
@@ -771,6 +852,38 @@ class MultiTextTabsController {
         this.closeMenu();
         document.removeEventListener("pointerdown", this.onDocumentPointerDown, true);
     }
+}
+
+/**
+ * All links of a graph.
+ *
+ * The frontend keeps the links in a Map, but older builds use a plain array
+ * - both have to work.
+ */
+function allLinks(graph) {
+    const links = graph && graph.links;
+    if (!links) {
+        return [];
+    }
+    if (typeof links.values === "function") {
+        return Array.from(links.values());
+    }
+    if (Array.isArray(links)) {
+        return links.slice();
+    }
+    return Object.keys(links).map((key) => links[key]).filter(Boolean);
+}
+
+/** Does this link start at the given node? */
+function belongsToNode(link, node) {
+    const origin = link.origin_id;
+    if (!origin || !node) {
+        return false;
+    }
+    if (origin === node || origin === node.id) {
+        return true;
+    }
+    return origin.id !== undefined && origin.id === node.id;
 }
 
 /** Find the controller of a node, if it has one. */
@@ -817,7 +930,7 @@ app.registerExtension({
                     // execution request - it must.
                     serialize: true,
                     hideOnZoom: false,
-                    getValue: () => controller.getTextsJson(),
+                    getValue: () => controller.getTextsPayload(),
                     setValue: (value) => controller.setText(value),
                     getMinHeight: () => 140,
                 });

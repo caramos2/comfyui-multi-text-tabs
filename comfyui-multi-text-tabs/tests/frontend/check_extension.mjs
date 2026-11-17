@@ -447,20 +447,98 @@ assert.ok(extension, "the extension must register itself");
 /* fake ComfyUI node                                                   */
 /* ------------------------------------------------------------------ */
 
+/** Find a link of the fake graph. */
+function linkOf(node, linkId) {
+    const graph = node.graph;
+    if (!graph || !graph.links) {
+        return null;
+    }
+    if (typeof graph.links.get === "function") {
+        return graph.links.get(linkId) || null;
+    }
+    return graph.links[linkId] || null;
+}
+
+/**
+ * Connect a link to a socket of the node, the way LiteGraph does it.
+ *
+ * A link remembers the slot number of its origin - that is how the backend
+ * knows which output of the node it has to take.
+ */
+function attachLink(node, outputIndex, linkId) {
+    const link = {
+        id: linkId,
+        origin_id: node.id,
+        origin_slot: outputIndex,
+        target_id: "2",
+        target_slot: 0,
+        type: "STRING",
+    };
+    node.graph.links.set(linkId, link);
+    return link;
+}
+
+/**
+ * An output socket whose "links" are derived from the link registry.
+ *
+ * That is what the real frontend does: the slot number lives inside the
+ * link, and the socket only shows the links that are registered for its
+ * current position. A socket that moves therefore takes its links with it
+ * only when the link is moved as well.
+ */
+function makeOutput(node, name, type) {
+    const output = { name, type, node };
+    Object.defineProperty(output, "links", {
+        get() {
+            const index = this.node.outputs.indexOf(this);
+            return index < 0 ? [] : this.node.linksForSlot(index);
+        },
+    });
+    return output;
+}
+
 function makeNode(comfyClass) {
     const node = {
         type: comfyClass || "MultiTextTabs",
         properties: {},
         widgets: [],
-        outputs: [{ name: "text", type: "STRING", links: [] }],
+        outputs: [],
+        id: "1",
         size: [300, 200],
+        graph: {
+            // The real frontend keeps the links in a Map and has no
+            // getLinkById - the fake has to look exactly like that,
+            // otherwise a broken link lookup stays invisible here.
+            links: new Map(),
+            beforeChange() {},
+            afterChange() {},
+        },
+        linksForSlot(index) {
+            const ids = [];
+            for (const link of this.graph.links.values()) {
+                if (link.origin_id === this.id && link.origin_slot === index) {
+                    ids.push(link.id);
+                }
+            }
+            return ids;
+        },
         addOutput(name, type) {
-            const output = { name, type, links: [] };
+            const output = makeOutput(this, name, type);
             this.outputs.push(output);
             return output;
         },
         removeOutput(index) {
+            // LiteGraph disconnects the links of the removed socket and moves
+            // the links of the sockets behind it one slot up.
+            for (const linkId of this.linksForSlot(index)) {
+                this.graph.links.delete(linkId);
+            }
             this.outputs.splice(index, 1);
+            for (const link of this.graph.links.values()) {
+                if (link.origin_id === this.id && link.origin_slot > index) {
+                    link.origin_slot -= 1;
+                }
+            }
         },
         constructor: { comfyClass: comfyClass || "MultiTextTabs" },
         setSize(size) {
@@ -492,6 +570,7 @@ function makeNode(comfyClass) {
             return widget;
         },
     };
+    node.outputs.push(makeOutput(node, "text", "STRING"));
     return node;
 }
 
@@ -572,7 +651,7 @@ check("the widget value carries every text as json", () => {
     controller.addNewTab();
     controller.editor.value = "second";
     controller.editor.dispatchEvent({ type: "input" });
-    assert.deepEqual(JSON.parse(widget.value), ["hello world", "second"]);
+    assert.deepEqual(JSON.parse(widget.value), { texts: ["hello world", "second"], active: 1 });
 });
 
 check("a fresh node starts with a single empty tab", () => {
@@ -597,7 +676,7 @@ check("typing updates the active tab and the widget value", () => {
     controller.editor.value = "第一段\n第二段";
     controller.editor.dispatchEvent({ type: "input" });
     assert.equal(node.properties.multi_text_tabs.tabs[0].content, "第一段\n第二段");
-    assert.deepEqual(JSON.parse(widget.value), ["第一段\n第二段"]);
+    assert.deepEqual(JSON.parse(widget.value), { texts: ["第一段\n第二段"], active: 0 });
 });
 
 check("switching tabs flushes the editor and loads the other text", () => {
@@ -783,7 +862,7 @@ check("the state survives a save and load round trip", () => {
     assert.equal(state.tabs[0].content, "persisted");
     assert.equal(state.tabs[1].content, "second");
     assert.equal(restored.__multiTextTabs.editor.value, "second");
-    assert.deepEqual(JSON.parse(widget.value), ["persisted", "second"]);
+    assert.deepEqual(JSON.parse(widget.value), { texts: ["persisted", "second"], active: 1 });
 });
 
 check("the widget value is derived and never overwrites the editor", () => {
@@ -796,7 +875,7 @@ check("the widget value is derived and never overwrites the editor", () => {
     controller.editor.dispatchEvent({ type: "input" });
     widget.value = "from workflow";
     assert.equal(controller.editor.value, "typed");
-    assert.deepEqual(JSON.parse(widget.value), ["typed"]);
+    assert.deepEqual(JSON.parse(widget.value), { texts: ["typed"], active: 0 });
 });
 
 check("removing the node cleans up the document listener", () => {
@@ -944,27 +1023,93 @@ check("a change is reported to the frontend", () => {
     assert.ok(calls.includes("dirty"), "the canvas must be marked dirty");
 });
 
-check("the node has one output socket per text", () => {
+check("the node has one output socket per text plus the main output", () => {
     const node = makeNode();
     const widgets = extension.getCustomWidgets();
     widgets.MULTI_TEXT_TABS_UI(node);
     extension.nodeCreated(node);
     const controller = node.__multiTextTabs;
 
-    assert.equal(node.outputs.length, 1);
+    assert.equal(node.outputs.length, 2);
     assert.equal(node.outputs[0].name, "待命文本 1");
+    assert.equal(node.outputs[1].name, "主输出");
 
     controller.addNewTab();
-    assert.equal(node.outputs.length, 2);
+    assert.equal(node.outputs.length, 3);
     assert.equal(node.outputs[1].name, "待命文本 2");
     assert.equal(node.outputs[1].type, "STRING");
+    assert.equal(node.outputs[2].name, "主输出");
 
     controller.renameTabById(controller.state().tabs[1].id, "镜头描述");
     assert.equal(node.outputs[1].name, "镜头描述");
+    assert.equal(node.outputs[2].name, "主输出");
 
     controller.closeTabById(controller.state().tabs[1].id);
-    assert.equal(node.outputs.length, 1);
+    assert.equal(node.outputs.length, 2);
     assert.equal(node.outputs[0].name, "待命文本 1");
+    assert.equal(node.outputs[1].name, "主输出");
+});
+
+check("the main output keeps its link when a text is added", () => {
+    const node = makeNode();
+    const widgets = extension.getCustomWidgets();
+    widgets.MULTI_TEXT_TABS_UI(node);
+    extension.nodeCreated(node);
+    const controller = node.__multiTextTabs;
+
+    controller.addNewTab();
+    assert.equal(node.outputs.length, 3);
+    assert.equal(node.outputs[2].name, "主输出");
+
+    // The main output is wired to a downstream node.
+    const link = attachLink(node, 2, 7);
+    assert.equal(link.origin_slot, 2);
+
+    controller.addNewTab();
+    assert.equal(node.outputs.length, 4);
+    assert.equal(node.outputs[2].name, "待命文本 3");
+    assert.equal(node.outputs[3].name, "主输出");
+    // The link has to follow the main output to its new slot, otherwise it
+    // would deliver the text of 待命文本 3 instead of the current text.
+    assert.equal(link.origin_slot, 3);
+    assert.deepEqual(node.outputs[3].links, [7]);
+});
+
+check("closing a text removes only its own socket", () => {
+    const node = makeNode();
+    const widgets = extension.getCustomWidgets();
+    widgets.MULTI_TEXT_TABS_UI(node);
+    extension.nodeCreated(node);
+    const controller = node.__multiTextTabs;
+
+    controller.addNewTab();
+    const link = attachLink(node, 2, 9);
+
+    controller.closeTabById(controller.state().tabs[1].id);
+    assert.equal(node.outputs.length, 2);
+    assert.equal(node.outputs[0].name, "待命文本 1");
+    assert.equal(node.outputs[1].name, "主输出");
+    assert.equal(link.origin_slot, 1);
+    assert.deepEqual(node.outputs[1].links, [9]);
+});
+
+check("the payload tells the backend which text is active", () => {
+    const node = makeNode();
+    const widgets = extension.getCustomWidgets();
+    const { widget } = widgets.MULTI_TEXT_TABS_UI(node);
+    extension.nodeCreated(node);
+    const controller = node.__multiTextTabs;
+
+    controller.editor.value = "first";
+    controller.editor.dispatchEvent({ type: "input" });
+    controller.addNewTab();
+    controller.editor.value = "second";
+    controller.editor.dispatchEvent({ type: "input" });
+    assert.deepEqual(JSON.parse(widget.value), { texts: ["first", "second"], active: 1 });
+
+    // Switching the tab changes what the main output carries.
+    controller.switchTo(controller.state().tabs[0].id);
+    assert.deepEqual(JSON.parse(widget.value), { texts: ["first", "second"], active: 0 });
 });
 
 check("the widget value is not written into the workflow file", () => {
@@ -986,7 +1131,9 @@ check("the node refuses more texts than the backend has outputs", () => {
         controller.addNewTab();
     }
     assert.equal(controller.state().tabs.length, 16);
-    assert.equal(node.outputs.length, 16);
+    // 16 texts plus the main output.
+    assert.equal(node.outputs.length, 17);
+    assert.equal(node.outputs[16].name, "主输出");
 });
 
 /* ------------------------------------------------------------------ */

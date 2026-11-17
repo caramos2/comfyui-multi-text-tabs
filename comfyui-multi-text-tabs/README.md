@@ -2,17 +2,18 @@
 
 A ComfyUI custom node that keeps several texts ("待命文本") in one node and
 gives **each text its own STRING output socket** on the right side, so you can
-always see which string is which.
+always see which string is which. One extra socket - **主输出** - carries the
+text of the 待命文本 that is currently selected.
 
 ```
 ┌────────────────────────────────────────────────────────────┐
 │  Multi-Text Tabs   [待命文本 1] [待命文本 2] [待命文本 3]  [+]│
 ├────────────────────────────────────────────────────────────┤
-│  当前待命文本：待命文本 2                                    │
+│  当前待命文本（主输出）：待命文本 2                            │
 │  A cinematic close-up, soft rim light, detailed fabric...   │
 │  ...                                                        │
 └────────────────────────────────────────────────────────────┘
-                          ● 待命文本 1    ● 待命文本 2
+     ● 待命文本 1   ● 待命文本 2   ● 待命文本 3   ● 主输出
 ```
 
 ## Features
@@ -21,6 +22,10 @@ always see which string is which.
   number of 待命文本, and every socket is named after the text it carries
   (`待命文本 1`, `待命文本 2`, or your own name). Nothing is concatenated,
   nothing is hidden behind a single "current" output.
+- **One more socket: 主输出 (main output).** It always carries the text of the
+  待命文本 that is currently selected. Wire a downstream node to it once and
+  switching tabs switches the content that is sent - no rewiring, no
+  juggling with slot numbers.
 - Add (＋) a new empty 待命文本 and type into it right away.
 - The tab bar sits above the editor; the editor grows with the node.
 - Close (×), rename (double click) and duplicate (right click) a text.
@@ -59,7 +64,7 @@ After the restart the node appears under the category **utils / text** as
 
 | Action | Result |
 |---|---|
-| Click a 待命文本 | The current text is committed, then the selected text is loaded. |
+| Click a 待命文本 | The current text is committed, then the selected text is loaded. The 主输出 now carries that text. |
 | Click ＋ | Creates a new empty 待命文本 named `待命文本 N` and switches to it. |
 | Click × | Closes the text. The last remaining text is never closed. |
 | Double click a text | Renames it in place. The output socket is renamed with it. |
@@ -73,6 +78,11 @@ accepts a STRING, for example **Preview as Text** or **Save Text**. Wire
 `待命文本 1` into one consumer and `待命文本 2` into another and both texts
 travel down their own path.
 
+The **主输出** socket is the one to use when a downstream node should always
+receive "whatever text is selected right now": connect it once, then click a
+different 待命文本 and the next run sends that text. The node shows the current
+selection in its status line ("当前待命文本（主输出）：…").
+
 ### Naming
 
 - A text you never renamed is called `待命文本 N`, where N is its position.
@@ -85,9 +95,18 @@ travel down their own path.
 
 | Data | Where | Reaches the backend? |
 |---|---|---|
-| All text titles and bodies | `node.properties.multi_text_tabs` | yes, as one JSON array |
-| The active text id | `node.properties.multi_text_tabs` | no |
-| The widget value | widget `texts` (JSON array) | yes |
+| All text titles and bodies | `node.properties.multi_text_tabs` | yes, as one JSON payload |
+| The active text id | `node.properties.multi_text_tabs` | yes, as part of that payload |
+| The widget value | widget `texts` (JSON payload) | yes |
+
+The payload looks like this:
+
+```
+{"texts": ["first text", "second text"], "active": 1}
+```
+
+`texts` are all texts in tab order, `active` is the index of the text that is
+currently selected - the backend needs it to fill the 主输出.
 
 Two different serialisation switches are used on purpose:
 
@@ -136,16 +155,18 @@ or any other global object.
 The test suite needs neither a browser nor a running ComfyUI:
 
 ```
-python tests/test_nodes.py                     # 10  backend contract
+python tests/test_nodes.py                     # 15  backend contract
 node tests/frontend/state.test.mjs             # 34  text state manager
-node tests/frontend/check_extension.mjs        # 28  extension against a fake DOM
+node tests/frontend/check_extension.mjs        # 31  extension against a fake DOM
 ```
 
 `check_extension.mjs` loads the shipped `web/multi_text_tabs.js` into a
 `node:vm` context with a bounded fake DOM, so the file that is tested is the
 file that ships. It also reproduces the reactive `node.properties` of the real
-frontend, which is where the state identity bug of v1.0 lived, and fakes the
-node output socket API so the "one socket per text" behaviour is covered.
+frontend, which is where the state identity bug of v1.0 lived, and it fakes
+the output socket API of the real frontend - including the way it registers
+links by slot number - so the "one socket per text plus 主输出" behaviour and
+the link bookkeeping are covered.
 
 ## Troubleshooting
 
@@ -153,6 +174,7 @@ node output socket API so the "one socket per text" behaviour is covered.
 |---|---|
 | The node shows a plain textarea without a tab bar | The frontend extension did not load. Open the browser console and look for `multi_text_tabs.js` errors; a hard refresh (`Ctrl` + `Shift` + `R`) reloads extensions. |
 | No output sockets appear | The node definition was not reloaded. Restart ComfyUI after installing, then hard refresh the browser. |
+| The 主输出 sends the wrong text | The browser still runs the extension of an older version - hard refresh (Ctrl + Shift + R) and check the status line. |
 | Sockets are gone after reopening a workflow | The workflow was saved by v1.0/v1.1, which used a single `text` output. The texts are still there - add the sockets again in the new version. |
 | A text shows an empty editor although it had text | The stored state was damaged; the node repairs it and logs the reason in the browser console. |
 

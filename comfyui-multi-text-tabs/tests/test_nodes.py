@@ -21,7 +21,12 @@ sys.path.insert(0, _PACKAGE_DIR)
 # importable as well to import the package itself.
 sys.path.insert(0, os.path.dirname(_PACKAGE_DIR))
 
-from nodes import MAX_TEXTS, TEXTS, MultiTextTabsNode  # noqa: E402
+from nodes import MAIN_OUTPUT, MAX_TEXTS, TEXTS, MultiTextTabsNode  # noqa: E402
+
+
+def payload(texts, active=0):
+    """The widget value the frontend sends."""
+    return json.dumps({"texts": texts, "active": active}, ensure_ascii=False)
 
 
 def test_input_shape():
@@ -38,10 +43,11 @@ def test_input_shape():
 
 
 def test_output_shape():
-    assert MultiTextTabsNode.RETURN_TYPES == ("STRING",) * MAX_TEXTS
+    # 16 text slots plus the main output.
+    assert MultiTextTabsNode.RETURN_TYPES == ("STRING",) * (MAX_TEXTS + 1)
     assert MultiTextTabsNode.RETURN_NAMES == tuple(
         "待命文本 %d" % (i + 1) for i in range(MAX_TEXTS)
-    )
+    ) + (MAIN_OUTPUT,)
     assert MultiTextTabsNode.FUNCTION == "get_texts"
     assert MultiTextTabsNode.CATEGORY == "utils/text"
     assert hasattr(MultiTextTabsNode, "get_texts")
@@ -58,48 +64,94 @@ def test_texts_are_returned_verbatim():
         "brace {weight:1.5} stays literal",
         "tabs\tand\r\nwindows newlines",
     ]
-    payload = json.dumps(samples, ensure_ascii=False)
-    result = node.get_texts(payload)
+    result = node.get_texts(payload(samples))
     assert list(result[: len(samples)]) == samples
 
 
 def test_empty_is_valid():
     node = MultiTextTabsNode()
-    assert node.get_texts("") == ("",) * MAX_TEXTS
-    assert node.get_texts("[]") == ("",) * MAX_TEXTS
+    assert node.get_texts("") == ("",) * (MAX_TEXTS + 1)
+    assert node.get_texts("[]") == ("",) * (MAX_TEXTS + 1)
+    assert node.get_texts(payload([])) == ("",) * (MAX_TEXTS + 1)
 
 
 def test_none_becomes_empty_strings():
     node = MultiTextTabsNode()
-    assert node.get_texts(None) == ("",) * MAX_TEXTS
+    assert node.get_texts(None) == ("",) * (MAX_TEXTS + 1)
 
 
 def test_malformed_json_is_taken_as_one_text():
     node = MultiTextTabsNode()
     result = node.get_texts("[not json")
     assert result[0] == "[not json"
-    assert result[1] == ""
+    # One text -> the main output (slot 1) carries that same text.
+    assert result[1] == "[not json"
 
 
 def test_plain_text_is_taken_as_one_text():
     node = MultiTextTabsNode()
     result = node.get_texts("just a prompt")
     assert result[0] == "just a prompt"
-    assert result[1] == ""
+    # One text -> the main output (slot 1) carries that same text.
+    assert result[1] == "just a prompt"
 
 
 def test_non_string_items_are_stringified():
     node = MultiTextTabsNode()
-    result = node.get_texts(json.dumps([123, None, True]))
+    result = node.get_texts(payload([123, None, True]))
     assert list(result[:3]) == ["123", "", "True"]
 
 
 def test_one_slot_per_output():
     node = MultiTextTabsNode()
-    result = node.get_texts(json.dumps(["a", "b"]))
+    result = node.get_texts(payload(["a", "b"]))
     assert isinstance(result, tuple)
-    assert len(result) == MAX_TEXTS
-    assert list(result[:4]) == ["a", "b", "", ""]
+    assert len(result) == MAX_TEXTS + 1
+    assert list(result[:4]) == ["a", "b", "a", "a"]
+
+
+def test_main_output_carries_the_active_text():
+    """The main output sits behind the texts, at slot len(texts)."""
+    node = MultiTextTabsNode()
+    result = node.get_texts(payload(["a", "b", "c"], active=2))
+    assert result[0] == "a"
+    assert result[1] == "b"
+    assert result[2] == "c"
+    # Slot 3 is the main output (three texts), the slots behind it repeat it.
+    assert result[3] == "c"
+    assert set(result[3:]) == {"c"}
+
+
+def test_main_output_follows_the_active_index():
+    node = MultiTextTabsNode()
+    assert node.get_texts(payload(["a", "b", "c"], active=0))[3] == "a"
+    assert node.get_texts(payload(["a", "b", "c"], active=1))[3] == "b"
+    assert node.get_texts(payload(["a", "b", "c"], active=2))[3] == "c"
+
+
+def test_main_output_is_the_only_repeated_slot():
+    node = MultiTextTabsNode()
+    result = node.get_texts(payload(["a", "b"], active=1))
+    assert result[0] == "a"
+    assert result[1] == "b"
+    assert result[2] == "b"
+
+
+def test_legacy_array_payload_still_works():
+    """A payload written by v1.2 has no active index."""
+    node = MultiTextTabsNode()
+    result = node.get_texts(json.dumps(["a", "b"]))
+    assert result[0] == "a"
+    assert result[1] == "b"
+    # Without an index the first text is the active one.
+    assert result[2] == "a"
+
+
+def test_active_index_out_of_range_falls_back():
+    node = MultiTextTabsNode()
+    assert node.get_texts(payload(["a", "b"], active=99))[2] == "a"
+    assert node.get_texts(payload(["a", "b"], active=-1))[2] == "a"
+    assert node.get_texts(payload(["a", "b"], active="x"))[2] == "a"
 
 
 def test_package_exports():
