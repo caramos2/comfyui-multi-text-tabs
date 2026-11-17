@@ -1,8 +1,7 @@
 /*
- * Multi-Text Tabs - node styles.
+ * Multi-Text Tabs - 节点样式。
  *
- * Everything is scoped under .mtt-* classes so the plugin cannot interfere
- * with the rest of the ComfyUI interface.
+ * 所有规则都限定在 .mtt-* 类名下，因此本插件不会干扰 ComfyUI 界面的其余部分。
  */
 
 .mtt-root {

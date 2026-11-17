@@ -1,18 +1,18 @@
 /**
- * Fake DOM harness for the Multi-Text Tabs frontend extension.
+ * 多文本标签前端扩展的假 DOM 测试台。
  *
  *     node tests/frontend/check_extension.mjs
  *
- * The real extension file is executed inside a node:vm context against a
- * bounded fake DOM. No browser, no network, no ComfyUI runtime - but the code
- * under test is the file that ships, not a copy of it.
+ * 真正的扩展文件会在 node:vm 上下文里针对一个有边界的假 DOM 执行。
+ * 不需要浏览器，不需要网络，也不需要 ComfyUI 运行时 —— 但被测代码就是
+ * 发布出去的那个文件，而不是它的副本。
  *
- * What is verified here:
- *   - the input is re-declared as the custom widget type;
- *   - the node ends up with exactly one widget, named "active_content";
- *   - the widget value always equals the live editor text;
- *   - typing, switching, adding, closing, renaming and duplicating behave;
- *   - the tab collection survives a save / load round trip.
+ * 这里验证的内容：
+ *   - 输入被重新声明为自定义控件类型；
+ *   - 节点最终只带一个名为 "active_content" 的控件；
+ *   - 控件值始终等于编辑器里的实时文本；
+ *   - 输入、切换、新增、关闭、重命名和复制都能正常工作；
+ *   - 标签集合能经得住一次保存 / 加载往返。
  */
 
 import assert from "node:assert/strict";
@@ -27,7 +27,7 @@ const statePath = resolve(webDir, "multi_text_tabs_state.js");
 const extensionPath = resolve(webDir, "multi_text_tabs.js");
 
 /* ------------------------------------------------------------------ */
-/* tiny fake DOM                                                       */
+/* 小型假 DOM                                                          */
 /* ------------------------------------------------------------------ */
 
 const camel = (name) => name.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
@@ -372,7 +372,7 @@ function makeFakeDocument(registry) {
 }
 
 /* ------------------------------------------------------------------ */
-/* load the shipped sources into a vm context                         */
+/* 把发布版源码载入 vm 上下文                                         */
 /* ------------------------------------------------------------------ */
 
 const registry = [];
@@ -399,7 +399,7 @@ const context = vm.createContext({
     __MTT_APP__: null,
 });
 
-// The state module: strip the export keywords and evaluate it as an IIFE.
+// 状态模块：去掉 export 关键字，按 IIFE 求值。
 const stateSource = readFileSync(statePath, "utf8");
 const exportedNames = [];
 const nameRe = /^export\s+(?:const|let|var|function)\s+([A-Za-z_$][\w$]*)/gm;
@@ -414,7 +414,7 @@ const stateModule = vm.runInContext(
     { filename: statePath }
 );
 
-// The extension: drop the import statements and the trailing export list.
+// 扩展模块：去掉 import 语句和末尾的 export 列表。
 let extensionSource = readFileSync(extensionPath, "utf8");
 extensionSource = extensionSource.replace(
     /import\s*\{([\s\S]*?)\}\s*from\s*"[^"]*"\s*;?/g,
@@ -444,10 +444,10 @@ vm.runInContext(extensionSource, context, { filename: extensionPath });
 assert.ok(extension, "the extension must register itself");
 
 /* ------------------------------------------------------------------ */
-/* fake ComfyUI node                                                   */
+/* 假 ComfyUI 节点                                                     */
 /* ------------------------------------------------------------------ */
 
-/** Find a link of the fake graph. */
+/** 取出假图里的一条连接。 */
 function linkOf(node, linkId) {
     const graph = node.graph;
     if (!graph || !graph.links) {
@@ -460,10 +460,10 @@ function linkOf(node, linkId) {
 }
 
 /**
- * Connect a link to a socket of the node, the way LiteGraph does it.
+ * 把一条连接接到节点的某个端点上，做法与 LiteGraph 一致。
  *
- * A link remembers the slot number of its origin - that is how the backend
- * knows which output of the node it has to take.
+ * 连接会记住自己源端的槽位编号 —— 后端就是靠它来判断
+ * 该取节点的哪一个输出。
  */
 function attachLink(node, outputIndex, linkId) {
     const link = {
@@ -479,12 +479,11 @@ function attachLink(node, outputIndex, linkId) {
 }
 
 /**
- * An output socket whose "links" are derived from the link registry.
+ * 输出端点，它的 "links" 由连接登记表推导而来。
  *
- * That is what the real frontend does: the slot number lives inside the
- * link, and the socket only shows the links that are registered for its
- * current position. A socket that moves therefore takes its links with it
- * only when the link is moved as well.
+ * 真实前端就是这么做的：槽位编号保存在连接里，端点只显示登记在
+ * 它当前位置上的那些连接。因此端点移动时，只有连接也跟着移动，
+ * 它才会带着自己的连接一起走。
  */
 function makeOutput(node, name, type) {
     const output = { name, type, node };
@@ -506,9 +505,9 @@ function makeNode(comfyClass) {
         id: "1",
         size: [300, 200],
         graph: {
-            // The real frontend keeps the links in a Map and has no
-            // getLinkById - the fake has to look exactly like that,
-            // otherwise a broken link lookup stays invisible here.
+            // 真实前端把连接存在 Map 里，并没有 getLinkById ——
+            // 假实现必须长得一模一样，否则连接查找坏掉时
+            // 在这里根本看不出来。
             links: new Map(),
             beforeChange() {},
             afterChange() {},
@@ -528,8 +527,8 @@ function makeNode(comfyClass) {
             return output;
         },
         removeOutput(index) {
-            // LiteGraph disconnects the links of the removed socket and moves
-            // the links of the sockets behind it one slot up.
+            // LiteGraph 会断开被移除端点上的连接，
+            // 并把它后面端点的连接整体往前挪一个槽位。
             for (const linkId of this.linksForSlot(index)) {
                 this.graph.links.delete(linkId);
             }
@@ -575,13 +574,11 @@ function makeNode(comfyClass) {
 }
 
 /**
- * A minimal stand-in for the Vue reactive object the frontend uses for
- * node.properties: reading a property returns a proxy of the stored object,
- * never the object that was written.
+ * 前端给 node.properties 用的 Vue 响应式对象的最小替身：
+ * 读取属性拿到的永远是所存对象的代理，而不是当初写进去的那个对象。
  *
- * This is what broke the plugin in the real frontend - comparing states by
- * object identity could never succeed, so every change was written into an
- * object the node no longer referenced.
+ * 这正是插件在真实前端里坏掉的原因 —— 按对象是否同一个来比较状态
+ * 永远不可能成功，于是每次改动都被写进了节点早已不再引用的对象里。
  */
 function makeReactive(target, cache = new WeakMap()) {
     return new Proxy(target, {
@@ -599,7 +596,7 @@ function makeReactive(target, cache = new WeakMap()) {
 }
 
 /* ------------------------------------------------------------------ */
-/* checks                                                              */
+/* 检查项                                                              */
 /* ------------------------------------------------------------------ */
 
 const checks = [];
@@ -634,8 +631,8 @@ check("the node owns exactly one widget named texts", () => {
     assert.ok(result.widget);
     assert.equal(result.widget.name, "texts");
     assert.equal(node.widgets.length, 1);
-    // The texts live in node.properties, so the widget value must not be
-    // written into the workflow file - but it has to reach the backend.
+    // 待命文本存放在 node.properties 里，所以控件值不能写进
+    // 工作流文件 —— 但它必须能送达后端。
     assert.equal(result.widget.serialize, false);
     assert.equal(result.widget.options.serialize, true);
     assert.equal(result.widget.options.socketless, true);
@@ -843,8 +840,8 @@ check("the state survives a save and load round trip", () => {
     controller.editor.value = "second";
     controller.editor.dispatchEvent({ type: "input" });
 
-    // What the frontend writes into the workflow file. The texts live in
-    // the properties - the widget value is not written a second time.
+    // 前端写进工作流文件的内容。待命文本存放在 properties 里 ——
+    // 控件值不会被写第二遍。
     const saved = {
         properties: JSON.parse(JSON.stringify(node.properties)),
         widgets_values: [],
@@ -1061,7 +1058,7 @@ check("the main output keeps its link when a text is added", () => {
     assert.equal(node.outputs.length, 3);
     assert.equal(node.outputs[2].name, "主输出");
 
-    // The main output is wired to a downstream node.
+    // 主输出已经连到下游节点上。
     const link = attachLink(node, 2, 7);
     assert.equal(link.origin_slot, 2);
 
@@ -1069,8 +1066,8 @@ check("the main output keeps its link when a text is added", () => {
     assert.equal(node.outputs.length, 4);
     assert.equal(node.outputs[2].name, "待命文本 3");
     assert.equal(node.outputs[3].name, "主输出");
-    // The link has to follow the main output to its new slot, otherwise it
-    // would deliver the text of 待命文本 3 instead of the current text.
+    // 连接必须跟着主输出一起挪到新槽位，否则它送出去的就是
+    // 待命文本 3 的内容，而不是当前文本。
     assert.equal(link.origin_slot, 3);
     assert.deepEqual(node.outputs[3].links, [7]);
 });
@@ -1107,7 +1104,7 @@ check("the payload tells the backend which text is active", () => {
     controller.editor.dispatchEvent({ type: "input" });
     assert.deepEqual(JSON.parse(widget.value), { texts: ["first", "second"], active: 1 });
 
-    // Switching the tab changes what the main output carries.
+    // 切换标签会改变主输出所承载的文本。
     controller.switchTo(controller.state().tabs[0].id);
     assert.deepEqual(JSON.parse(widget.value), { texts: ["first", "second"], active: 0 });
 });
@@ -1131,13 +1128,13 @@ check("the node refuses more texts than the backend has outputs", () => {
         controller.addNewTab();
     }
     assert.equal(controller.state().tabs.length, 16);
-    // 16 texts plus the main output.
+    // 16 段待命文本，外加主输出。
     assert.equal(node.outputs.length, 17);
     assert.equal(node.outputs[16].name, "主输出");
 });
 
 /* ------------------------------------------------------------------ */
-/* run                                                                 */
+/* 运行                                                                */
 /* ------------------------------------------------------------------ */
 
 let failed = 0;

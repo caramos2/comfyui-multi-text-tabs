@@ -1,23 +1,21 @@
 /**
- * Multi-Text Tabs - ComfyUI frontend extension.
+ * Multi-Text Tabs - ComfyUI 前端扩展。
  *
- * Architecture (see the technical blueprint):
+ * 架构分层（见技术蓝图）：
  *
- *   State Manager  -> multi_text_tabs_state.js (pure, unit tested)
- *   Widget Bridge  -> this file, keeps widget value and tab state in sync
- *   Tab UI         -> this file, plain DOM inside a DOM widget
+ *   状态管理器  -> multi_text_tabs_state.js（纯逻辑，可独立单测）
+ *   widget 桥接 -> 本文件，保持 widget 值与标签状态同步
+ *   标签 UI     -> 本文件，在 DOM widget 内部用原生 DOM 实现
  *
- * The node keeps exactly one widget, named "texts". It is a DOM widget so
- * that the tab bar can sit above the editor and so that the editor value we
- * hand to the backend is always the live text of the active tab - there is
- * no "last keystroke lost on switch" race.
+ * 节点只保留一个名为 "texts" 的 widget。它是 DOM widget，这样标签栏能放在
+ * 编辑区上方，而且交给后端的编辑区值永远是当前标签的实时文本 —— 不存在
+ * "切换时丢掉最后一次输入"的竞态。
  *
- * The widget value is a JSON payload with every text and the index of the
- * active one, so the backend can fill the main output with the text of the
- * currently selected 待命文本.
+ * widget 值是一段 JSON 载荷，含全部文本和当前活动项的下标，后端据此把
+ * 当前选中的待命文本填进主输出。
  *
- * The full tab collection is stored in node.properties.multi_text_tabs and is
- * therefore part of the workflow file, not part of the execution prompt.
+ * 完整标签集合存放在 node.properties.multi_text_tabs，因此属于工作流文件，
+ * 而不属于执行提示词。
  */
 
 import { app } from "../../scripts/app.js";
@@ -43,21 +41,21 @@ const WIDGET_TYPE = "MULTI_TEXT_TABS_UI";
 const INPUT_NAME = "texts";
 
 /**
- * Upper bound of texts per node - the backend has one STRING output per text.
- * Must match MAX_TEXTS in nodes.py.
+ * 每个节点的文本条数上限 —— 后端每条文本对应一个 STRING 输出。
+ * 必须与 nodes.py 中的 MAX_TEXTS 一致。
  */
 const MAX_TEXTS = 16;
 
 /**
- * Name of the output that carries the text of the currently selected text.
- * It always sits behind the text outputs, so that the slot numbers of the
- * text outputs never shift when a text is added or closed.
+ * 承载"当前选中文本"的输出端点名。
+ * 它固定排在所有文本输出之后，这样新增或关闭文本时，
+ * 文本输出的槽位序号一个都不会错位。
  */
 const MAIN_OUTPUT = "主输出";
 
 const UNDO_TIMEOUT_MS = 8000;
 
-/** Inject the stylesheet once. */
+/** 样式表只注入一次。 */
 function ensureStylesheet() {
     const href = new URL("./multi_text_tabs.css", import.meta.url).href;
     if (document.querySelector('link[data-multi-text-tabs="1"]')) {
@@ -71,11 +69,10 @@ function ensureStylesheet() {
 }
 
 /**
- * The UI of one node: tab bar + editor + status line.
+ * 单个节点的 UI：标签栏 + 编辑区 + 状态行。
  *
- * The controller is created together with the DOM widget (see
- * getCustomWidgets) because the widget's value contract is defined by the
- * textarea that lives inside it.
+ * 控制器与 DOM widget 一起创建（见 getCustomWidgets），
+ * 因为 widget 的取值约定是由其中的 textarea 决定的。
  */
 class MultiTextTabsController {
     constructor(node) {
@@ -83,8 +80,8 @@ class MultiTextTabsController {
         this.widget = null;
         this.undoTimer = null;
         this.undoPayload = null;
-        // The state object this controller owns. node.properties holds the
-        // very same object, the frontend only reads it through a proxy.
+        // 本控制器所拥有的状态对象。node.properties 里放的就是同一个对象，
+        // 前端只是通过一层代理去读它。
         this.canonical = null;
 
         this.root = document.createElement("div");
@@ -131,41 +128,39 @@ class MultiTextTabsController {
         this.attachEvents();
     }
 
-    /* ------------------------------------------------------------------ */
-    /* state                                                               */
-    /* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ */
+/* 状态                                                                */
+/* ------------------------------------------------------------------ */
 
-    /**
-     * The tab collection of this node.
+/**
+     * 本节点的标签集合。
      *
-     * node.properties is the single source of truth. It is repaired lazily so
-     * that a node created by the frontend, restored from a workflow or cloned
-     * from another node all end up with a valid state.
+     * node.properties 是唯一权威来源。它采用惰性修复，因此前端新建的节点、
+     * 从工作流还原的节点、以及从别的节点克隆出来的节点，最终都会拿到
+     * 一份有效状态。
      */
     state() {
         const stored = this.node.properties ? this.node.properties[STORAGE_KEY] : undefined;
-        // The frontend keeps node.properties inside a Vue reactive object, so
-        // reading it back gives a proxy instead of the object we wrote. Object
-        // identity therefore never matches and the state has to be identified
-        // by its marker instead.
+        // 前端把 node.properties 放在 Vue reactive 对象里，所以读回来的是
+        // 代理而不是我们写入的那个对象。对象身份因此永远对不上，
+        // 状态只能改用它内部的标记来识别。
         if (this.canonical) {
             const storedMarker = readStateMarker(stored);
             if (storedMarker && storedMarker === readStateMarker(this.canonical)) {
                 return this.canonical;
             }
             if (!stored) {
-                // The property was removed - put our state back.
+                // 属性被删掉了 —— 把我们的状态放回去。
                 this.writeState(this.canonical);
                 return this.canonical;
             }
-            // The state was replaced from the outside (workflow load, copy or
-            // undo): adopt the new one.
+            // 状态被外部换掉了（载入工作流、复制或撤销）：接管新的那一个。
             this.canonical = null;
         }
         const result = normalizeState(stored, this.editor.value);
         this.canonical = result.state;
         this.writeState(this.canonical);
-        // "no stored state" is the normal start of a fresh node, not a repair.
+        // 「没有存状态」是新节点的正常起点，不属于需要修复的损坏。
         const notes = result.issues.filter((issue) => issue !== "no stored state");
         if (notes.length) {
             console.warn("[Multi-Text Tabs] repaired tab state:", notes.join("; "));
@@ -173,10 +168,10 @@ class MultiTextTabsController {
         return this.canonical;
     }
 
-    /**
-     * Store the state in node.properties, which stays the single source of
-     * truth. The object that is written is the one this controller owns, so
-     * every change that is made to it is visible in the workflow file.
+/**
+     * 把状态存进 node.properties —— 它始终是唯一权威来源。
+     * 写进去的对象正是本控制器所拥有的那一个，因此对它做的任何改动
+     * 都会体现在工作流文件里。
      */
     writeState(state) {
         if (!this.node.properties) {
@@ -185,7 +180,7 @@ class MultiTextTabsController {
         this.node.properties[STORAGE_KEY] = state;
     }
 
-    /** Copy the live editor text into the active tab. */
+    /** 把编辑区里的实时文本写回当前标签。 */
     flushActive() {
         const state = this.state();
         const active = getActiveTab(state);
@@ -197,16 +192,15 @@ class MultiTextTabsController {
         }
     }
 
-    /* ------------------------------------------------------------------ */
-    /* rendering                                                           */
-    /* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ */
+/* 渲染                                                                */
+/* ------------------------------------------------------------------ */
 
-    /**
-     * Paint the tab bar and the status line.
+/**
+     * 绘制标签栏与状态行。
      *
-     * This never writes the editor text back into the state: on a workflow
-     * load the editor is empty while the restored state already holds the
-     * text, and flushing here would wipe it.
+     * 这里绝不把编辑区文本写回状态：载入工作流时编辑区是空的，
+     * 而还原出来的状态里已经带着文本，在这里回写会把内容抹掉。
      */
     render() {
         const state = this.state();
@@ -217,8 +211,8 @@ class MultiTextTabsController {
 
     renderTabs(state) {
         const row = this.tabsRow;
-        // Rebuild the row: tab count is small and this keeps the DOM in sync
-        // with the state without any diffing logic.
+        // 整行重建：标签数量不大，这样不用任何差异比对逻辑
+        // 就能让 DOM 与状态保持一致。
         while (row.firstChild) {
             row.removeChild(row.firstChild);
         }
@@ -237,7 +231,7 @@ class MultiTextTabsController {
 
         const title = document.createElement("span");
         title.className = "mtt-tab-title";
-        // textContent, never innerHTML: tab titles are user input.
+        // 只用 textContent，绝不用 innerHTML：标签标题是用户输入的内容。
         title.textContent = tab.title;
         item.appendChild(title);
 
@@ -251,42 +245,39 @@ class MultiTextTabsController {
         return item;
     }
 
-    /**
-     * Make the output sockets match the texts.
+/**
+     * 让输出端点与文本一一对应。
      *
-     * One socket per 待命文本, named after it, so the wiring on the right side
-     * tells which string goes where. The socket order is the tab order, which
-     * is the order the backend returns the texts in.
+     * 每条待命文本一个端点，名字与文本同名，这样右侧的接线一眼能看出
+     * 哪根线走的是哪串文本。端点顺序就是标签顺序，也就是后端返回文本的顺序。
      *
-     * Behind the text sockets there is one more socket, the main output. It
-     * carries the text of the currently selected 待命文本, so a downstream
-     * node can be wired once and switched by clicking a tab.
+     * 文本端点之后还有一个端点，就是主输出。它承载当前选中的那条待命文本，
+     * 于是下游节点只要接一次线，靠点击标签就能切换。
      *
-     * The main output always stays at the end. That keeps the slot numbers
-     * of the text outputs stable: the backend maps a link to an output by
-     * its slot number, never by its name.
+     * 主输出始终留在末尾。这样文本输出的槽位序号保持稳定：
+     * 后端是靠槽位序号把连线映射到输出的，从不靠名字。
      */
     syncOutputs() {
         const state = this.state();
         const titles = state.tabs.map((tab) => tab.title);
         const node = this.node;
 
-        // The main output always exists.
+        // 主输出永远存在。
         if (node.outputs.length === 0) {
             node.addOutput(MAIN_OUTPUT, "STRING");
         }
 
-        // Drop the sockets of texts that are gone. They sit right in front
-        // of the main output, which is never one of them.
+        // 移除已经不存在的文本端点。它们紧挨在主输出前面，
+        // 而主输出自己不在其中。
         while (node.outputs.length > titles.length + 1) {
-            // LiteGraph moves the links of the sockets behind the removed
-            // one to their new slot on its own.
+            // LiteGraph 会自己把被移除端点之后的那些连线的槽位序号
+            // 挪到新位置。
             node.removeOutput(titles.length);
         }
 
         titles.forEach((title, index) => {
             if (index === node.outputs.length - 1) {
-                // Only the main output is left: put the text socket in front.
+                // 只剩主输出：把文本端点插到它前面。
                 this.insertOutput(index, title);
                 return;
             }
@@ -307,7 +298,7 @@ class MultiTextTabsController {
             main.type = "STRING";
         }
 
-        // The sockets need room of their own.
+        // 端点需要自己的空间。
         const wanted = Math.max(320, 200 + titles.length * 20);
         if (!node.size || node.size[1] < wanted) {
             node.setSize([node.size ? node.size[0] : 420, wanted]);
@@ -315,13 +306,12 @@ class MultiTextTabsController {
         node.setDirtyCanvas?.(true, true);
     }
 
-    /**
-     * Insert an output socket at a given position.
+/**
+     * 在指定位置插入一个输出端点。
      *
-     * LiteGraph only appends new outputs, so the socket is moved into place
-     * by hand. The links of this node that start behind that position have
-     * to move with it - otherwise the main output would keep the old slot
-     * number and would deliver the wrong text.
+     * LiteGraph 只会追加新输出，所以这个端点得手工挪到位。
+     * 本节点中起点在该位置之后的连线必须跟着一起移动 —— 否则主输出会留在
+     * 旧槽位上，送出错误的文本。
      */
     insertOutput(index, name) {
         const node = this.node;
@@ -331,12 +321,11 @@ class MultiTextTabsController {
         this.shiftLinks(index, 1);
     }
 
-    /**
-     * Move the links of this node that start at slot "from" by "delta".
+/**
+     * 把本节点中起点位于槽位 "from" 的连线整体移动 "delta"。
      *
-     * The frontend stores the slot number of a link inside the link and
-     * derives the "links" of a socket from it, so the number has to be
-     * corrected when a socket moves.
+     * 前端把连线的槽位序号存在连线对象内部，端点的 "links" 是由它推导出来的，
+     * 所以端点移动时这个序号必须同步修正。
      */
     shiftLinks(from, delta) {
         const node = this.node;
@@ -369,7 +358,7 @@ class MultiTextTabsController {
         this.status.appendChild(name);
     }
 
-    /** Put the text of the active tab into the editor. */
+    /** 把当前标签的文本放进编辑区。 */
     loadActiveIntoEditor() {
         const state = this.state();
         const active = getActiveTab(state);
@@ -379,9 +368,9 @@ class MultiTextTabsController {
         }
     }
 
-    /* ------------------------------------------------------------------ */
-    /* actions                                                             */
-    /* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ */
+/* 操作                                                                */
+/* ------------------------------------------------------------------ */
 
     switchTo(id) {
         const state = this.state();
@@ -389,7 +378,7 @@ class MultiTextTabsController {
             return;
         }
         this.withChangeTracking(() => {
-            // Commit whatever is in the editor before the active tab changes.
+            // 活动标签切换之前，先把编辑区里的内容写回。
             this.flushActive();
             setActiveTab(state, id);
             this.loadActiveIntoEditor();
@@ -424,13 +413,13 @@ class MultiTextTabsController {
         }
         let result = null;
         this.withChangeTracking(() => {
-            // Capture a pending edit of the tab that is about to disappear.
+            // 把即将消失的标签上还没提交的编辑先存下来。
             this.flushActive();
             result = closeTab(state, id);
             if (!result.closed) {
                 return;
             }
-            // The automatically named texts stay consecutive.
+            // 自动命名的文本保持编号连续。
             renumberAutoTitles(state);
             if (result.activated) {
                 this.loadActiveIntoEditor();
@@ -444,7 +433,7 @@ class MultiTextTabsController {
             return;
         }
         if (target.content.length > 0) {
-            // Non empty tab: offer an undo instead of a blocking dialog.
+            // 标签非空：给一次撤销的机会，而不是弹一个阻塞式对话框。
             this.undoPayload = { tab: result.removed, index: result.index };
             this.showNotice("已关闭 \u300c" + target.title + "\u300d", "撤销");
         }
@@ -501,9 +490,9 @@ class MultiTextTabsController {
         }
     }
 
-    /* ------------------------------------------------------------------ */
-    /* notice / menu                                                       */
-    /* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ */
+/* 提示条 / 右键菜单                                                   */
+/* ------------------------------------------------------------------ */
 
     showNotice(message, actionLabel) {
         this.clearUndoTimer();
@@ -582,9 +571,9 @@ class MultiTextTabsController {
         this.menu = null;
     }
 
-    /* ------------------------------------------------------------------ */
-    /* rename                                                              */
-    /* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ */
+/* 重命名                                                              */
+/* ------------------------------------------------------------------ */
 
     startRename(id) {
         const state = this.state();
@@ -641,20 +630,19 @@ class MultiTextTabsController {
         input.addEventListener("dblclick", (event) => event.stopPropagation());
     }
 
-    /* ------------------------------------------------------------------ */
-    /* events                                                              */
-    /* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ */
+/* 事件                                                                */
+/* ------------------------------------------------------------------ */
 
     attachEvents() {
-        // Capture phase: keep the canvas from starting a node drag or a graph
-        // zoom while the user works inside the widget.
+        // 捕获阶段：用户还在 widget 里操作时，别让画布开始拖动节点
+        // 或缩放画布。
         const stop = (event) => event.stopPropagation();
         ["pointerdown", "mousedown", "wheel"].forEach((name) => {
             this.root.addEventListener(name, stop, true);
         });
-        // Bubble phase: the handlers of the tab bar have to run first (double
-        // click renames, right click opens the menu). Stopping the event here
-        // keeps it away from the canvas afterwards.
+        // 冒泡阶段：标签栏自己的处理器必须先跑完（双击重命名、
+        // 右键打开菜单）。在这里拦下事件，之后它就到不了画布那里。
         ["dblclick", "contextmenu"].forEach((name) => {
             this.root.addEventListener(name, stop);
         });
@@ -763,13 +751,12 @@ class MultiTextTabsController {
         }
     }
 
-    /** Tell ComfyUI that the widget value changed. */
+    /** 告诉 ComfyUI：widget 的值变了。 */
     notifyWidgetChanged() {
         if (this.widget) {
             try {
-                // Assigning the value runs options.setValue and the widget
-                // callback, which is how the frontend is told about the
-                // change. The value is derived from the tab state.
+                // 给 widget 赋值会触发 options.setValue 和 widget 的 callback，
+                // 前端就是这样得知变化的。这个值由标签状态推导而来。
                 this.widget.value = this.getTextsPayload();
             } catch (error) {
                 console.warn("[Multi-Text Tabs] widget callback failed", error);
@@ -780,13 +767,12 @@ class MultiTextTabsController {
         }
     }
 
-    /**
-     * Run a mutation and report the change to the frontend.
+/**
+     * 执行一次改动，并把变更上报给前端。
      *
-     * The pattern is the one the frontend itself uses for structural node
-     * changes: before the change the canvas state is captured, after it the
-     * change is committed. Every step is optional, so the plugin also works
-     * in a frontend that does not know these hooks.
+     * 用的是前端自己做结构性节点变更时的那套模式：改动前先捕获画布状态，
+     * 改动后再提交变更。每一步都是可选的，所以插件在不认识这些钩子的
+     * 前端里同样能正常工作。
      */
     withChangeTracking(mutation) {
         const graph = this.node ? this.node.graph : null;
@@ -816,21 +802,21 @@ class MultiTextTabsController {
         }
     }
 
-    /* ------------------------------------------------------------------ */
-    /* widget bridge                                                       */
-    /* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ */
+/* widget 桥接                                                         */
+/* ------------------------------------------------------------------ */
 
-    /** The text of the active tab - what the editor shows. */
+    /** 当前标签的文本 —— 编辑区里显示的就是它。 */
     getText() {
         return this.editor.value;
     }
 
-    /**
-     * Every text of the node plus the index of the active one.
+/**
+     * 节点的全部文本，加上当前活动项的下标。
      *
-     * This is the value that goes to the backend: one entry per 待命文本, in
-     * tab order, so output i carries text i. The active index tells the
-     * backend which text the main output has to carry.
+     * 这就是送往后端的值：每条待命文本一项，按标签顺序排列，
+     * 于是第 i 个输出就带第 i 条文本。活动项下标告诉后端
+     * 主输出该携带哪一条文本。
      */
     getTextsPayload() {
         const state = this.state();
@@ -839,12 +825,12 @@ class MultiTextTabsController {
         return JSON.stringify({ texts, active: active < 0 ? 0 : active });
     }
 
-    /**
-     * The widget value is derived from the tab state, so restoring it must
-     * never touch the editor - the editor follows the tab state instead.
+/**
+     * widget 值由标签状态推导而来，所以还原它的时候绝不能碰编辑区 ——
+     * 应当是编辑区跟随标签状态。
      */
     setText() {
-        // intentionally empty
+        // 故意留空
     }
 
     dispose() {
@@ -855,10 +841,9 @@ class MultiTextTabsController {
 }
 
 /**
- * All links of a graph.
+ * 取出一个图里的全部连线。
  *
- * The frontend keeps the links in a Map, but older builds use a plain array
- * - both have to work.
+ * 前端把连线存在 Map 里，而较旧的构建用的是普通数组 —— 两种都得能用。
  */
 function allLinks(graph) {
     const links = graph && graph.links;
@@ -874,7 +859,7 @@ function allLinks(graph) {
     return Object.keys(links).map((key) => links[key]).filter(Boolean);
 }
 
-/** Does this link start at the given node? */
+    /** 这条连线是不是从指定节点出发的？ */
 function belongsToNode(link, node) {
     const origin = link.origin_id;
     if (!origin || !node) {
@@ -886,7 +871,7 @@ function belongsToNode(link, node) {
     return origin.id !== undefined && origin.id === node.id;
 }
 
-/** Find the controller of a node, if it has one. */
+    /** 找出某个节点的控制器（如果它有的话）。 */
 function controllerOf(node) {
     return node && node.__multiTextTabs ? node.__multiTextTabs : null;
 }
@@ -896,11 +881,10 @@ ensureStylesheet();
 app.registerExtension({
     name: "comfyui-multi-text-tabs",
 
-    /**
-     * Re-declare the input as a custom widget type so that the node owns a
-     * single DOM widget (tab bar + editor) instead of a native textarea plus
-     * a second widget. The input keeps its name, so the workflow file and the
-     * execution prompt still use "active_content".
+/**
+     * 把这个输入重新声明为自定义 widget 类型，让节点只持有一个 DOM widget
+     *（标签栏 + 编辑区），而不是原生 textarea 再加一个 widget。
+     * 输入名保持不变，所以工作流文件和执行提示词里仍然是 "active_content"。
      */
     beforeRegisterNodeDef(nodeType, nodeData) {
         if (!nodeData || nodeData.name !== NODE_TYPE) {
@@ -913,10 +897,10 @@ app.registerExtension({
         required[INPUT_NAME] = [WIDGET_TYPE, { default: "" }];
     },
 
-    /**
-     * Provide the DOM widget for the custom input type.
-     * The returned widget is the only widget of the node, so the text is
-     * saved in the workflow file and sent to the backend by name.
+/**
+     * 为这个自定义输入类型提供 DOM widget。
+     * 返回的 widget 是节点唯一的 widget，因此文本既会存进工作流文件，
+     * 也会按名字发给后端。
      */
     getCustomWidgets() {
         return {
@@ -926,17 +910,15 @@ app.registerExtension({
 
                 const widget = node.addDOMWidget(INPUT_NAME, "multiTextTabs", controller.root, {
                     socketless: true,
-                    // options.serialize decides whether the value goes into the
-                    // execution request - it must.
+                    // options.serialize 决定这个值是否进入执行请求 —— 必须进。
                     serialize: true,
                     hideOnZoom: false,
                     getValue: () => controller.getTextsPayload(),
                     setValue: (value) => controller.setText(value),
                     getMinHeight: () => 140,
                 });
-                // widget.serialize decides whether the value goes into the
-                // workflow file. The texts live in node.properties, so the
-                // widget must not write them a second time.
+                // widget.serialize 决定这个值是否进入工作流文件。
+                // 文本住在 node.properties 里，widget 不该再写第二遍。
                 widget.serialize = false;
                 controller.widget = widget;
                 return { widget };
@@ -944,7 +926,7 @@ app.registerExtension({
         };
     },
 
-    /** A node was created - give it a valid state and paint it. */
+    /** 节点被创建 —— 给它一份有效状态并绘制出来。 */
     nodeCreated(node) {
         if (!node || node.constructor?.comfyClass !== NODE_TYPE) {
             return;
@@ -964,7 +946,7 @@ app.registerExtension({
         }
     },
 
-    /** A workflow was loaded - repaint from the restored properties. */
+    /** 工作流被载入 —— 按还原出来的 properties 重新绘制。 */
     loadedGraphNode(node) {
         const controller = controllerOf(node);
         if (!controller) {
@@ -975,7 +957,7 @@ app.registerExtension({
         controller.render();
     },
 
-    /** Graph level fallback for the load hook. */
+    /** 载入钩子在图这一级的兜底处理。 */
     afterConfigureGraph() {
         const graph = app.graph;
         if (!graph || !graph._nodes) {

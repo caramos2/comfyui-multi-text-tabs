@@ -1,10 +1,10 @@
 /**
- * Multi-Text Tabs - tab state manager.
+ * Multi-Text Tabs - 标签状态管理器。
  *
- * This module is deliberately free of any DOM or ComfyUI dependency so that it
- * can be unit tested in plain Node (see tests/frontend/).
+ * 本模块刻意不依赖任何 DOM 或 ComfyUI 接口，因此可以用纯 Node 直接
+ * 做单元测试（见 tests/frontend/）。
  *
- * The whole tab collection lives in a single node property:
+ * 完整标签集合存放在单个节点属性里：
  *
  *   node.properties.multi_text_tabs = {
  *     version: 1,
@@ -12,53 +12,51 @@
  *     tabs: [ { id, title, content }, ... ]
  *   }
  *
- * Rules implemented here (blueprint sections 3.4, 6.3, 7):
- *   - ids are unique and stable;
- *   - at least one tab always exists;
- *   - content is always a string;
- *   - a damaged or missing state is repaired instead of throwing.
+ * 这里实现的规则（技术蓝图 §3.4、§6.3、§7）：
+ *   - id 唯一且稳定；
+ *   - 永远至少存在一个标签；
+ *   - 正文永远是字符串；
+ *   - 状态损坏或缺失时做修复，而不是抛异常。
  */
 
-/** Key under which the tab collection is stored in node.properties. */
+/** 标签集合在 node.properties 中的存放键名。 */
 export const STORAGE_KEY = "multi_text_tabs";
 
-/** Current schema version of the tab collection. */
+/** 标签集合当前的数据结构版本号。 */
 export const SCHEMA_VERSION = 1;
 
-/** Prefix used for automatically generated tab titles. */
+/** 自动生成标签标题时使用的前缀。 */
 export const TITLE_PREFIX = "待命文本";
 
-/** Longest title that is kept in the data (display is truncated further). */
+/** 数据中保留的标题最大长度（显示时还会进一步截断）。 */
 export const MAX_TITLE_LENGTH = 120;
 
 /**
- * Name of the non enumerable marker that identifies one state instance.
+ * 用于识别某一份状态实例的、不可枚举的标记名。
  *
- * Why this exists: the ComfyUI frontend keeps node.properties inside a Vue
- * reactive object. Reading a property back therefore returns a reactive
- * *proxy* of the object that was written - never the same object. Comparing
- * two states with "===" therefore never matches, every read looks like a
- * brand new state and any change made to a state that was fetched earlier is
- * written into an object that is no longer referenced by the node.
+ * 为什么需要它：ComfyUI 前端把 node.properties 放在 Vue reactive 对象里，
+ * 所以读回来的是所写对象的 reactive *代理*，永远不是同一个对象。
+ * 于是用 "===" 比较两个状态永远不成立，每次读取都像是一份全新的状态，
+ * 而对先前取到的状态所做的任何修改，都会被写进一个节点早已不再引用的对象。
  *
- * The marker survives the proxy, so it gives us a stable identity. It is not
- * enumerable, so it never appears in the workflow file.
+ * 标记能穿透代理，因此它提供了稳定的身份标识。它不可枚举，
+ * 所以绝不会出现在工作流文件里。
  */
 export const STATE_MARKER = "__mtt_state_marker";
 
 let markerCounter = 0;
 
-/** A fresh marker value. */
+/** 生成一个新的标记值。 */
 export function createStateMarker() {
     markerCounter += 1;
     return "mtt-" + Date.now().toString(36) + "-" + markerCounter;
 }
 
 /**
- * Attach a marker to a state object.
+ * 给状态对象挂上标记。
  *
- * @param {object} state        the state to mark
- * @param {string} [marker]     marker to reuse, a new one is minted otherwise
+ * @param {object} state        要打标记的状态
+ * @param {string} [marker]     复用的标记；不传则新铸一个
  */
 export function attachStateMarker(state, marker) {
     if (!state || typeof state !== "object") {
@@ -73,7 +71,7 @@ export function attachStateMarker(state, marker) {
     return state;
 }
 
-/** The marker of a state object, or null when it has none. */
+/** 取状态对象上的标记；没有则返回 null。 */
 export function readStateMarker(state) {
     if (!state || typeof state !== "object") {
         return null;
@@ -85,8 +83,8 @@ export function readStateMarker(state) {
 let idCounter = 0;
 
 /**
- * Build an id that is not present in usedIds.
- * Ids look like "tab_001" and stay stable for the lifetime of the tab.
+ * 生成一个 usedIds 里没有的 id。
+ * id 形如 "tab_001"，并在标签的整个生命周期内保持稳定。
  */
 export function createTabId(usedIds) {
     const used = usedIds instanceof Set ? usedIds : new Set(usedIds || []);
@@ -99,7 +97,7 @@ export function createTabId(usedIds) {
 }
 
 /**
- * Normalise a user supplied title: trim, fall back when empty, cap length.
+ * 规范化用户给的标题：去空白，为空时回退，并限制长度上限。
  */
 export function sanitizeTitle(raw, fallback) {
     let title = typeof raw === "string" ? raw.trim() : "";
@@ -113,9 +111,9 @@ export function sanitizeTitle(raw, fallback) {
 }
 
 /**
- * The next automatic title, e.g. "Text 2".
- * Starts from tabs.length + 1 and skips names that are already taken, so a
- * number the user has already seen is never silently reused.
+ * 下一个自动标题，例如 "Text 2"。
+ * 从 tabs.length + 1 开始，并跳过已被占用的名字，
+ * 这样用户已经见过的编号绝不会被悄悄重复使用。
  */
 export function nextAutoTitle(titles) {
     const used = new Set((titles || []).map((t) => (typeof t === "string" ? t.trim() : "")));
@@ -127,7 +125,7 @@ export function nextAutoTitle(titles) {
 }
 
 /**
- * Make a title unique by appending a counter: "Text 1", "Text 1 (2)", ...
+ * 给标题加一个计数后缀使其唯一："Text 1"、"Text 1 (2)"、……
  */
 export function uniqueTitle(base, titles) {
     const used = new Set((titles || []).map((t) => (typeof t === "string" ? t.trim() : "")));
@@ -142,7 +140,7 @@ export function uniqueTitle(base, titles) {
     return root + " (" + n + ")";
 }
 
-/** A pristine state holding a single empty tab. */
+/** 一份全新的状态，只含一个空标签。 */
 export function defaultState(fallbackContent) {
     const content = typeof fallbackContent === "string" ? fallbackContent : "";
     return attachStateMarker({
@@ -153,12 +151,12 @@ export function defaultState(fallbackContent) {
 }
 
 /**
- * Repair whatever we find in node.properties into a valid state.
+ * 把 node.properties 里现有的任何东西修复成一份有效状态。
  *
- * @param {*} raw            the raw value stored in node.properties
- * @param {string} fallbackContent  text to use when there is no usable state
- * @returns {{state: object, issues: string[]}} repaired state plus a list of
- *          human readable notes about everything that had to be repaired.
+ * @param {*} raw            node.properties 里存的原始值
+ * @param {string} fallbackContent  没有可用状态时使用的文本
+ * @returns {{state: object, issues: string[]}} 修复后的状态，外加一份
+ *          人类可读的问题清单，列出所有被修复的地方。
  */
 export function normalizeState(raw, fallbackContent) {
     const issues = [];
@@ -180,7 +178,7 @@ export function normalizeState(raw, fallbackContent) {
         return { state: defaultState(fallback), issues: issues.concat(["tabs is empty"]) };
     }
 
-    // Pass 1 - ids must exist and must be unique.
+    // 第一遍 —— id 必须存在，且必须唯一。
     const usedIds = new Set();
     const staged = raw.tabs.map((rawTab) => {
         const tab = rawTab && typeof rawTab === "object" ? rawTab : {};
@@ -197,7 +195,7 @@ export function normalizeState(raw, fallbackContent) {
         return { id: id, title: tab.title, content: tab.content };
     });
 
-    // Pass 2 - titles must be non empty strings.
+    // 第二遍 —— 标题必须是非空字符串。
     const titles = [];
     staged.forEach((tab) => {
         const fallbackTitle = nextAutoTitle(titles);
@@ -206,7 +204,7 @@ export function normalizeState(raw, fallbackContent) {
         tab.title = title;
     });
 
-    // Pass 3 - content must be a string.
+    // 第三遍 —— 正文必须是字符串。
     staged.forEach((tab) => {
         if (typeof tab.content !== "string") {
             issues.push("tab " + tab.id + " had non string content, reset to empty");
@@ -224,21 +222,21 @@ export function normalizeState(raw, fallbackContent) {
             issues.push("active_id " + wanted + " does not exist, fell back to " + state.active_id);
         }
     }
-    // A repaired state is still the same state, so it keeps its marker.
+    // 修复后的状态仍然是同一份状态，所以它保留自己的标记。
     return { state: attachStateMarker(state, readStateMarker(raw)), issues: issues };
 }
 
 /**
- * Renumber the automatically named texts so that they stay consecutive.
+ * 给自动命名的文本重新编号，让编号保持连续。
  *
- * Only titles that still look like "待命文本 3" are touched - a text the user
- * renamed keeps its own name.
+ * 只有看起来仍像 "待命文本 3" 的标题会被改动 —— 用户改过名的文本
+ * 保留自己的名字。
  */
 export function renumberAutoTitles(state) {
     const pattern = new RegExp("^" + TITLE_PREFIX + "\\s+\\d+$");
     state.tabs.forEach((tab, index) => {
         if (typeof tab.title === "string" && pattern.test(tab.title.trim())) {
-            // The n-th text of the list is called "待命文本 n".
+            // 列表里第 n 条文本就叫 "待命文本 n"。
             const wanted = TITLE_PREFIX + " " + (index + 1);
             if (tab.title.trim() !== wanted) {
                 tab.title = wanted;
@@ -248,9 +246,9 @@ export function renumberAutoTitles(state) {
     return state;
 }
 
-/** Deep copy of a state (used when a node is copied). */
+/** 状态的深拷贝（节点被复制时使用）。 */
 export function cloneState(state) {
-    // A copy is an independent state, so it gets its own marker.
+    // 副本是一份独立的状态，所以它有自己的标记。
     return attachStateMarker({
         version: state.version,
         active_id: state.active_id,
@@ -262,7 +260,7 @@ export function cloneState(state) {
     });
 }
 
-/** Find a tab by id. */
+/** 按 id 查找标签。 */
 export function getTab(state, id) {
     if (!state || !Array.isArray(state.tabs)) {
         return null;
@@ -270,12 +268,12 @@ export function getTab(state, id) {
     return state.tabs.find((tab) => tab.id === id) || null;
 }
 
-/** The tab whose text is currently being edited. */
+/** 当前正在编辑正文的那个标签。 */
 export function getActiveTab(state) {
     return getTab(state, state && state.active_id);
 }
 
-/** Switch the active tab. Returns false when the id is unknown. */
+/** 切换活动标签。id 未知时返回 false。 */
 export function setActiveTab(state, id) {
     if (!getTab(state, id)) {
         return false;
@@ -285,7 +283,7 @@ export function setActiveTab(state, id) {
 }
 
 /**
- * Create a new tab.
+ * 新建一个标签。
  *
  * @param {object} state
  * @param {{title?: string, content?: string, activate?: boolean}} options
@@ -310,7 +308,7 @@ export function addTab(state, options) {
     return tab;
 }
 
-/** Rename a tab. The text content is never touched. */
+/** 重命名标签。正文内容永远不动。 */
 export function renameTab(state, id, title) {
     const tab = getTab(state, id);
     if (!tab) {
@@ -322,8 +320,8 @@ export function renameTab(state, id, title) {
 }
 
 /**
- * Duplicate a tab: same title pattern and same content, new id.
- * The copy becomes the active tab.
+ * 复制一个标签：标题沿用同样的命名方式，正文相同，id 是新的。
+ * 副本会成为当前活动标签。
  */
 export function duplicateTab(state, id) {
     const source = getTab(state, id);
@@ -345,9 +343,9 @@ export function duplicateTab(state, id) {
 }
 
 /**
- * Close a tab. The last remaining tab is never removed.
- * When the active tab is closed the next tab becomes active (or the previous
- * one when the closed tab was the last).
+ * 关闭一个标签。最后剩下的那一个永远不会被关掉。
+ * 关掉的是活动标签时，下一个标签成为活动项（若关掉的是最后一个，
+ * 则由上一个接管）。
  */
 export function closeTab(state, id) {
     const index = state.tabs.findIndex((tab) => tab.id === id);
@@ -364,12 +362,11 @@ export function closeTab(state, id) {
         state.active_id = next.id;
         activated = next.id;
     }
-    // The original position is reported so that an undo can put the tab back
-    // where the user had it.
+    // 回报原始位置，这样撤销时能把标签放回用户原来摆的地方。
     return { closed: true, removed: removed, activated: activated, index: index };
 }
 
-/** Store new text in the active tab. */
+/** 把新文本存进当前活动标签。 */
 export function setActiveContent(state, content) {
     const tab = getActiveTab(state);
     if (!tab) {
@@ -379,7 +376,7 @@ export function setActiveContent(state, content) {
     return true;
 }
 
-/** Titles of all tabs, in display order. */
+/** 全部标签的标题，按显示顺序排列。 */
 export function tabTitles(state) {
     return state.tabs.map((tab) => tab.title);
 }

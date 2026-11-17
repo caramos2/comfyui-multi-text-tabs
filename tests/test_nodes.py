@@ -1,31 +1,31 @@
-"""Backend tests for the Multi-Text Tabs node.
+"""多文本标签节点的后端测试。
 
-The backend module deliberately has no ComfyUI dependency, so the tests run
-with a plain Python interpreter:
+后端模块刻意不依赖 ComfyUI，因此这些测试用纯 Python 解释器即可运行：
 
     python tests/test_nodes.py
 
-They also run under pytest:
+在 pytest 下同样可以运行：
 
     python -m pytest tests/test_nodes.py -q
 """
 
 import importlib
+import importlib.util
 import json
 import os
 import sys
 
 _PACKAGE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _PACKAGE_DIR)
-# The package directory name contains dashes, so its parent has to be
-# importable as well to import the package itself.
+# 插件包目录名里带有连字符，因此它的上级目录也必须可导入，
+# 才能把插件包本身导入进来。
 sys.path.insert(0, os.path.dirname(_PACKAGE_DIR))
 
 from nodes import MAIN_OUTPUT, MAX_TEXTS, TEXTS, MultiTextTabsNode  # noqa: E402
 
 
 def payload(texts, active=0):
-    """The widget value the frontend sends."""
+    """前端发过来的控件值。"""
     return json.dumps({"texts": texts, "active": active}, ensure_ascii=False)
 
 
@@ -37,13 +37,13 @@ def test_input_shape():
     spec_type, spec_options = required[TEXTS]
     assert spec_type == "STRING"
     assert spec_options["multiline"] is True
-    # The text must reach the backend exactly as typed.
+    # 文本必须原样送达后端，不做任何加工。
     assert spec_options["dynamicPrompts"] is False
     assert spec_options["default"] == ""
 
 
 def test_output_shape():
-    # 16 text slots plus the main output.
+    # 16 个待命文本槽位，外加主输出。
     assert MultiTextTabsNode.RETURN_TYPES == ("STRING",) * (MAX_TEXTS + 1)
     assert MultiTextTabsNode.RETURN_NAMES == tuple(
         "待命文本 %d" % (i + 1) for i in range(MAX_TEXTS)
@@ -84,7 +84,7 @@ def test_malformed_json_is_taken_as_one_text():
     node = MultiTextTabsNode()
     result = node.get_texts("[not json")
     assert result[0] == "[not json"
-    # One text -> the main output (slot 1) carries that same text.
+    # 只有一段文本 -> 主输出（槽位 1）承载的也是同一段文本。
     assert result[1] == "[not json"
 
 
@@ -92,7 +92,7 @@ def test_plain_text_is_taken_as_one_text():
     node = MultiTextTabsNode()
     result = node.get_texts("just a prompt")
     assert result[0] == "just a prompt"
-    # One text -> the main output (slot 1) carries that same text.
+    # 只有一段文本 -> 主输出（槽位 1）承载的也是同一段文本。
     assert result[1] == "just a prompt"
 
 
@@ -111,13 +111,13 @@ def test_one_slot_per_output():
 
 
 def test_main_output_carries_the_active_text():
-    """The main output sits behind the texts, at slot len(texts)."""
+    """主输出排在所有待命文本之后，位于槽位 len(texts)。"""
     node = MultiTextTabsNode()
     result = node.get_texts(payload(["a", "b", "c"], active=2))
     assert result[0] == "a"
     assert result[1] == "b"
     assert result[2] == "c"
-    # Slot 3 is the main output (three texts), the slots behind it repeat it.
+    # 槽位 3 是主输出（三段文本），它后面的槽位都重复它。
     assert result[3] == "c"
     assert set(result[3:]) == {"c"}
 
@@ -138,12 +138,12 @@ def test_main_output_is_the_only_repeated_slot():
 
 
 def test_legacy_array_payload_still_works():
-    """A payload written by v1.2 has no active index."""
+    """v1.2 写出的负载没有活动索引。"""
     node = MultiTextTabsNode()
     result = node.get_texts(json.dumps(["a", "b"]))
     assert result[0] == "a"
     assert result[1] == "b"
-    # Without an index the first text is the active one.
+    # 没有索引时，第一段文本就是活动文本。
     assert result[2] == "a"
 
 
@@ -155,20 +155,27 @@ def test_active_index_out_of_range_falls_back():
 
 
 def test_package_exports():
-    # The package directory name contains dashes; importlib resolves such
-    # names through the path finder just fine.
-    package = importlib.import_module("comfyui-multi-text-tabs")
+    # 仓库根目录就是自定义节点包：ComfyUI 会加载它被克隆到的那个目录下的
+    # __init__.py。
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    spec = importlib.util.spec_from_file_location(
+        "mtt_package",
+        os.path.join(root, "__init__.py"),
+        submodule_search_locations=[root],
+    )
+    package = importlib.util.module_from_spec(spec)
+    sys.modules["mtt_package"] = package
+    spec.loader.exec_module(package)
     node_class = package.NODE_CLASS_MAPPINGS["MultiTextTabs"]
     assert node_class.__name__ == "MultiTextTabsNode"
-    # The package imports its own copy of the module, so compare behaviour
-    # rather than object identity.
+    # 插件包会导入自己那份模块副本，因此这里比较的是行为，
+    # 而不是对象是否同一个。
     assert node_class.INPUT_TYPES() == MultiTextTabsNode.INPUT_TYPES()
     assert node_class.RETURN_TYPES == MultiTextTabsNode.RETURN_TYPES
     assert package.NODE_DISPLAY_NAME_MAPPINGS["MultiTextTabs"] == "Multi-Text Tabs"
     assert package.WEB_DIRECTORY == "./web"
-    web_dir = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web"
-    )
+    assert package.__version__ == "1.3"
+    web_dir = os.path.join(root, "web")
     assert os.path.isfile(os.path.join(web_dir, "multi_text_tabs.js"))
     assert os.path.isfile(os.path.join(web_dir, "multi_text_tabs.css"))
     assert os.path.isfile(os.path.join(web_dir, "multi_text_tabs_state.js"))

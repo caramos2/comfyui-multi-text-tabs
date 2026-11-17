@@ -1,10 +1,10 @@
 /**
- * Unit tests for the pure tab state manager.
+ * 纯标签状态管理器的单元测试。
  *
  *     node tests/frontend/state.test.mjs
  *
- * No framework, no browser, no ComfyUI - the module under test has no
- * dependencies at all.
+ * 不需要测试框架，不需要浏览器，也不依赖 ComfyUI —— 被测模块
+ * 本身没有任何依赖。
  */
 
 import assert from "node:assert/strict";
@@ -20,7 +20,7 @@ function test(name, fn) {
     tests.push([name, fn]);
 }
 
-/* ---------------------------------------------------------------- default */
+/* --------------------------------------------------------------- 默认状态 */
 
 test("defaultState holds one empty tab", () => {
     const state = S.defaultState();
@@ -36,7 +36,7 @@ test("defaultState can adopt the fallback content", () => {
     assert.equal(state.tabs[0].content, "kept text");
 });
 
-/* -------------------------------------------------------------- normalize */
+/* --------------------------------------------------------------- 状态规整 */
 
 test("normalizeState repairs a missing state", () => {
     const { state, issues } = S.normalizeState(undefined, "fallback");
@@ -125,7 +125,7 @@ test("normalizeState gives a tab without id a new one", () => {
     assert.ok(state.tabs[0].id);
 });
 
-/* --------------------------------------------------------------- editing */
+/* ------------------------------------------------------------------ 编辑 */
 
 test("addTab creates a unique id and activates the tab", () => {
     const state = S.defaultState();
@@ -238,7 +238,7 @@ test("setActiveContent writes into the active tab only", () => {
     assert.equal(state.active_id, second.id);
 });
 
-/* ----------------------------------------------------------------- clone */
+/* ------------------------------------------------------------------ 克隆 */
 
 test("cloneState is a deep copy", () => {
     const state = S.defaultState();
@@ -251,7 +251,7 @@ test("cloneState is a deep copy", () => {
     assert.equal(copy.tabs[0].id, state.tabs[0].id);
 });
 
-/* ---------------------------------------------------------------- marker */
+/* ------------------------------------------------------------------ 标记 */
 
 test("defaultState carries a marker", () => {
     const state = S.defaultState();
@@ -285,7 +285,7 @@ test("cloneState is an independent state with its own marker", () => {
     assert.notEqual(S.readStateMarker(copy), S.readStateMarker(state));
 });
 
-/* ------------------------------------------------------------- renumber */
+/* ------------------------------------------------------------- 重新编号 */
 
 test("closing a text renumbers the automatically named ones", () => {
     const state = S.defaultState();
@@ -316,7 +316,7 @@ test("renumbering does not touch a text the user renamed", () => {
     assert.equal(state.tabs[1].title, "待命文本 2");
 });
 
-/* ------------------------------------------------------------------ run */
+/* ----------------------------------------------------------------- 运行 */
 
 let failed = 0;
 for (const [name, fn] of tests) {
