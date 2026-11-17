@@ -11,7 +11,7 @@ Multi-Text Tabs
 │  ...                                                        │
 └────────────────────────────────────────────────────────────┘
 |
-文档用途： 可直接交给 Codex / Claude Code / 本地 Agent 作为立项说明、架构约束、开发任务拆解与验收依据。
+文档用途： 可直接交给 Codex / Claude Code / 本地开发助手作为立项说明、架构约束、开发任务拆解与验收依据。
 版本：v1.0    |    日期：2026 年 11 月 15 日    |    项目类型：ComfyUI 自定义节点插件
 
 1. 项目目标与产品定义
@@ -214,7 +214,7 @@ def get_text(self, active_content):
 return (active_content,)
 |
 
-说明：这是后端接口示意，Agent 实施时应按目标 ComfyUI 版本的节点注册规范调整，不要把它当成已经测试过的完整插件。dynamicPrompts=False 的目的是让文本内容保持原样；如果你希望保留 ComfyUI 动态提示词语法，可将其做成可配置选项。
+说明：这是后端接口示意，实施时应按目标 ComfyUI 版本的节点注册规范调整，不要把它当成已经测试过的完整插件。dynamicPrompts=False 的目的是让文本内容保持原样；如果你希望保留 ComfyUI 动态提示词语法，可将其做成可配置选项。
 4.3 输出契约
 项目
 | 规定
@@ -445,7 +445,7 @@ Widget 与 properties 不一致
 | 用 textContent / 安全文本节点；固定 properties 键名；禁止将用户文本拼入 innerHTML。
 |
 
-11. 给开发 Agent 的执行指令
+11. 给开发助手的执行指令
 | 总指令
 先完成 P0 技术验证，再按 P1 → P5 实施。不要一上来就写复杂 UI。每完成一个阶段都要实际启动 ComfyUI 验证，不得仅凭静态代码推断成功。
 |
@@ -456,7 +456,7 @@ Widget 与 properties 不一致
 实现 State Manager 与 Widget Bridge，再实现标签新增、切换、关闭和重命名。
 根据当前前端渲染模式决定 Tab UI Adapter；不要把旧版 Canvas 绘制代码作为唯一方案。
 完成全部验收清单；提供完整插件目录、README、测试工作流和一份变更说明。
-11.1 Agent 不得违反的架构约束
+11.1 不得违反的架构约束
 不得把全部文本拼接后输出；默认输出严格等于当前活动标签正文。
 不得把标签正文依赖 localStorage/sessionStorage；工作流文件必须是权威持久化来源。
 不得在 Python 后端重复存储前端标签数据；前后端职责必须分开。
@@ -464,7 +464,7 @@ Widget 与 properties 不一致
 不得在切换标签时重建整个节点；只更新活动 ID 与文本 Widget。
 不得静默截断用户长文本；对异常状态应修复或提示。
 12. 官方资料与技术核对依据
-本蓝图按截至 2026-11-15 可查阅的 ComfyUI 官方前端 / 后端资料制定。开发 Agent 应在实施时再次核对当前分支接口。
+本蓝图按截至 2026-11-15 可查阅的 ComfyUI 官方前端 / 后端资料制定。实施时应再次核对当前分支接口。
 ComfyUI Frontend Extension Development Guide：扩展如何加载、WEB_DIRECTORY、app.registerExtension 与扩展钩子。
 https://github.com/Comfy-Org/ComfyUI_frontend/blob/main/docs/extensions/development.md
 ComfyUI Widget Serialization：区分 widget.serialize（工作流持久化）与 widget.options.serialize（API Prompt 输入）。
